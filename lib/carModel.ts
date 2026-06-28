@@ -1,6 +1,6 @@
 // Stage 2: model inspection + part classification.
 //
-// The prepared model (public/models/car_glb.glb) is NOT separated into named
+// The prepared model (public/models/datsun.glb) is NOT separated into named
 // body parts (door_left, hood, roof, …) the way the original plan assumed.
 // It is a typical asset grouped *by material*: ~70 meshes named
 // "Plane.0XX_<material>" sharing 14 materials (paint, coat, chrome, glass,
@@ -11,7 +11,7 @@
 // and `coat` materials; everything else (wheels, glass, chrome, lights, trim)
 // is left untouched by the wrap.
 
-export const MODEL_PATH = "/models/car_glb.glb";
+export const MODEL_PATH = "/models/datsun.glb";
 
 /** Semantic groups every mesh in the model is sorted into. */
 export type CarPartCategory =
