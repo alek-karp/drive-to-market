@@ -1,23 +1,144 @@
-import type { BrandProfile } from "./types";
+import type { AdConcept, BrandProfile } from "./types";
 
-/**
- * Build the text prompt for the wrap ad. We hand Grok the brand identity and
- * ask for standalone flat production artwork. The generated image is mapped
- * onto the 3D car later, so the model must not include a car mockup itself.
- */
-export function buildAdPrompt(brand: BrandProfile): string {
-  const colors = brand.colors.slice(0, 4).join(", ") || "bold brand colors";
-  const subheader = brand.headlineText || brand.description;
+export function buildAdConcepts(brand: BrandProfile, count = 4): AdConcept[] {
+  const base = [
+    concept(brand, "proof", "left", 92),
+    concept(brand, "offer", "right", 88),
+    concept(brand, "category", "center", 82),
+    concept(brand, "speed", "left", 78),
+    concept(brand, "premium", "right", 74),
+    concept(brand, "local", "center", 70),
+  ];
+
+  return base.slice(0, Math.max(1, Math.min(count, base.length)));
+}
+
+export function buildAdBackgroundPrompt(
+  brand: BrandProfile,
+  concept: AdConcept,
+): string {
+  const primaryColor = brand.colors[0] ?? "the primary brand color";
+  const accentColor = brand.colors[1] ?? "one subtle accent color";
+  const differentiators = brand.differentiators.slice(0, 3).join(", ");
+
   return [
-    `Create standalone flat 2D vehicle-wrap decal artwork for the brand "${brand.name}".`,
-    brand.description ? `Brand context: ${brand.description}.` : "",
-    `Use the brand colors ${colors}.`,
-    "The artwork should look like a wide horizontal vinyl decal sheet: transparent or plain background, bold vector-style shapes, clean negative space, high contrast, dynamic accent lines, and a professional commercial wrap layout.",
-    `Include only two text elements: the brand logo/name "${brand.name}" and one very short subheader${subheader ? ` inspired by "${subheader}"` : ""}. The subheader must be 2 to 5 words maximum.`,
-    "Do not include paragraphs, body copy, bullet points, addresses, phone numbers, URLs, disclaimers, fine print, labels, or repeated text.",
-    "Do not render a car, truck, van, car door, door handle, window, wheel, road, garage, showroom, photo background, mockup, or any vehicle surface.",
-    "Output only the flat decal graphic artwork that will later be placed onto a 3D car.",
+    `Create a sparse flat 2D vehicle-wrap background for ${brand.category} brand "${brand.name}".`,
+    `Audience: ${brand.audience}. Tone: ${brand.tone}.`,
+    `Visual direction: ${concept.visualDirection}.`,
+    differentiators ? `Brand proof points: ${differentiators}.` : "",
+    `Use mostly ${primaryColor}, with only small accents of ${accentColor} and one quiet neutral if needed.`,
+    "Use a large calm field of negative space and one simple abstract shape family.",
+    "Prefer smooth bands, broad gradients, or one oversized geometric form.",
+    "No arrows unless the brand identity explicitly uses arrows.",
+    "No checkerboards, zebra stripes, maze patterns, dense line fields, tangled shapes, scattered icons, high-frequency detail, or visual clutter.",
+    "No more than two dominant colors in the final image.",
+    "Do not reserve space for text; this texture must work as background art only.",
+    "Do not generate any words, letters, logos, fake typography, tiny labels, UI, paragraphs, URLs, phone numbers, addresses, badges, watermarks, signatures, or repeated text.",
+    "Do not render a car, truck, van, door handle, wheel, road, garage, showroom, photo background, or mockup.",
+    "Output only clean abstract background artwork.",
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function concept(
+  brand: BrandProfile,
+  angle: "proof" | "offer" | "category" | "speed" | "premium" | "local",
+  focalArea: AdConcept["focalArea"],
+  score: number,
+): AdConcept {
+  const category = titleCase(brand.category);
+  const differentiator = brand.differentiators[0] ?? brand.offer;
+
+  const copy = {
+    proof: {
+      hook: shortLine(brand.headlineText || `${brand.name} That Delivers`, 34),
+      subheader: shortLine(differentiator, 46),
+      visualDirection:
+        "one oversized soft geometric form with generous calm space",
+    },
+    offer: {
+      hook: shortLine(brand.offer, 34),
+      subheader: shortLine(`Built for ${brand.audience}`, 46),
+      visualDirection:
+        "a simple broad diagonal color field with restrained contrast",
+    },
+    category: {
+      hook: shortLine(`${category}, Made Clear`, 34),
+      subheader: shortLine(brand.description, 46),
+      visualDirection:
+        "one crisp category-neutral graphic anchor on a quiet field",
+    },
+    speed: {
+      hook: shortLine(`Move Faster With ${brand.name}`, 34),
+      subheader: shortLine(brand.offer, 46),
+      visualDirection:
+        "a single smooth sweep suggesting motion without arrows or busy lines",
+    },
+    premium: {
+      hook: shortLine(`Choose ${brand.name}`, 34),
+      subheader: shortLine(differentiator, 46),
+      visualDirection:
+        "restrained premium background with one precise accent shape",
+    },
+    local: {
+      hook: shortLine(`${brand.name} Near You`, 34),
+      subheader: shortLine(`For ${brand.audience}`, 46),
+      visualDirection:
+        "friendly simple campaign background with one memorable shape",
+    },
+  }[angle];
+
+  return {
+    id: angle,
+    hook: copy.hook,
+    subheader: copy.subheader,
+    cta: shortLine(carWrapCta(brand), 28),
+    visualDirection: copy.visualDirection,
+    focalArea,
+    score,
+  };
+}
+
+function carWrapCta(brand: BrandProfile): string {
+  const domain = displayDomain(brand.websiteUrl);
+  if (domain) return domain;
+
+  const cta = brand.requiredCta.trim();
+  if (/quote|estimate|consult/i.test(cta)) return cta;
+  if (/book|schedule|appointment/i.test(cta)) return "Book by phone";
+  if (/shop|order|menu/i.test(cta)) return "Visit online";
+  return "Call for a quote";
+}
+
+function displayDomain(value: string | null): string | null {
+  if (!value) return null;
+
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return value
+      .replace(/^https?:\/\//i, "")
+      .replace(/^www\./, "")
+      .split("/")[0];
+  }
+}
+
+function shortLine(value: string, max: number): string {
+  const text = value.replace(/[|•]/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return "Ready When You Are";
+  if (text.length <= max) return text;
+
+  const words = text.split(" ");
+  let out = "";
+  for (const word of words) {
+    const next = out ? `${out} ${word}` : word;
+    if (next.length > max) break;
+    out = next;
+  }
+  return out || text.slice(0, max).trim();
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\b\w/g, (char) => char.toUpperCase());
 }

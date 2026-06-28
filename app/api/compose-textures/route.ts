@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { normalizeOptionalBrandProfile } from "@/lib/brandProfile";
 import { composeTextures } from "@/lib/composeTextures";
-import type { BrandProfile, WrapDesign } from "@/lib/types";
+import type { WrapDesign } from "@/lib/types";
 
 /** Stage 6: brand + design -> one composed PNG texture per car part. */
 export const POST = async (request: Request) => {
@@ -17,7 +18,7 @@ export const POST = async (request: Request) => {
     return NextResponse.json({ error: "Missing 'design'" }, { status: 400 });
   }
 
-  const normalizedBrand = normalizeBrandProfile(brand);
+  const normalizedBrand = normalizeOptionalBrandProfile(brand);
 
   try {
     // brand is optional: without it we still compose the graphic, just no name.
@@ -67,52 +68,4 @@ const normalizeGraphics = (
   if (!decalUrl || !patternUrl) return null;
 
   return { decalUrl, patternUrl };
-};
-
-const normalizeBrandProfile = (value: unknown): BrandProfile | undefined => {
-  if (!value || typeof value !== "object") return undefined;
-
-  const candidate = value as Partial<BrandProfile>;
-  const name = candidate.name?.trim();
-  if (!name) return undefined;
-
-  return {
-    name,
-    description: candidate.description?.trim() ?? "",
-    colors: sanitizeColors(candidate.colors),
-    logoUrl: normalizeNullableString(candidate.logoUrl),
-    screenshotPath: normalizeNullableString(candidate.screenshotPath),
-    headlineText: candidate.headlineText?.trim() ?? "",
-    keywords: sanitizeKeywords(candidate.keywords),
-  };
-};
-
-const sanitizeColors = (value: BrandProfile["colors"] | unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter((entry) => /^#?[0-9a-f]{3}([0-9a-f]{3})?$/i.test(entry))
-    .map((entry) =>
-      entry.startsWith("#") ? entry.toUpperCase() : `#${entry.toUpperCase()}`,
-    );
-};
-
-const sanitizeKeywords = (
-  value: BrandProfile["keywords"] | unknown,
-): string[] => {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-};
-
-const normalizeNullableString = (value: unknown): string | null => {
-  if (typeof value !== "string") return null;
-
-  const trimmed = value.trim();
-  return trimmed || null;
 };

@@ -19,7 +19,7 @@ export async function scrapeWebsite(url: string): Promise<BrandProfile> {
   const fallbackName = hostToName(host);
 
   const html = await fetchHtml(normalized);
-  if (!html) return fallbackProfile(fallbackName);
+  if (!html) return fallbackProfile(fallbackName, normalized);
 
   const meta = parseMeta(html);
   const name = pickName(meta, fallbackName);
@@ -36,15 +36,23 @@ export async function scrapeWebsite(url: string): Promise<BrandProfile> {
     meta["og:description"] ??
     `${name} — ${truncate(stripTags(headlineText), 140)}`;
   const keywords = extractKeywords(meta, html);
+  const category = inferCategory(meta, keywords, description, headlineText);
 
   return {
     name,
     description: truncate(collapse(description), 200),
     colors,
     logoUrl,
+    websiteUrl: normalized,
     screenshotPath: null,
     headlineText: truncate(collapse(stripTags(headlineText)), 120),
     keywords,
+    audience: inferAudience(category, description, keywords),
+    offer: inferOffer(description, headlineText, keywords),
+    category,
+    tone: inferTone(description, keywords),
+    differentiators: inferDifferentiators(description, headlineText, keywords),
+    requiredCta: inferCta(description, headlineText),
   };
 }
 
@@ -213,6 +221,121 @@ function extractKeywords(meta: Meta, html: string): string[] {
   return out.slice(0, 6);
 }
 
+function inferCategory(
+  meta: Meta,
+  keywords: string[],
+  description: string,
+  headline: string,
+): string {
+  const haystack = [
+    meta["og:type"],
+    meta["application-name"],
+    description,
+    headline,
+    keywords.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  for (const [category, words] of CATEGORY_HINTS) {
+    if (words.some((word) => haystack.includes(word))) return category;
+  }
+  return keywords[0] ? `${keywords[0]} brand` : "business";
+}
+
+function inferAudience(
+  category: string,
+  description: string,
+  keywords: string[],
+): string {
+  const text = `${category} ${description} ${keywords.join(" ")}`.toLowerCase();
+  if (/\b(developer|api|software|platform|saas|data)\b/.test(text)) {
+    return "teams evaluating modern software";
+  }
+  if (/\b(restaurant|food|coffee|bar|bakery|menu)\b/.test(text)) {
+    return "nearby customers choosing where to eat or drink";
+  }
+  if (/\b(real estate|home|property|mortgage|builder)\b/.test(text)) {
+    return "local buyers, sellers, and homeowners";
+  }
+  if (/\b(fitness|gym|wellness|health|clinic|dental)\b/.test(text)) {
+    return "people ready to improve their health";
+  }
+  if (/\b(shop|store|retail|fashion|apparel|product)\b/.test(text)) {
+    return "shoppers looking for a trusted local brand";
+  }
+  return "local customers ready to take action";
+}
+
+function inferOffer(
+  description: string,
+  headline: string,
+  keywords: string[],
+): string {
+  const text = collapse(stripTags(`${headline}. ${description}`));
+  const offerMatch = text.match(
+    /\b(free|save|sale|trial|quote|demo|consultation|estimate|delivery|same[- ]day|book|join|learn)\b[^.!?]{0,70}/i,
+  );
+  if (offerMatch) return truncate(offerMatch[0], 90);
+
+  const phrase = keywords.slice(0, 3).join(", ");
+  return phrase ? `trusted ${phrase}` : "a clear next step";
+}
+
+function inferTone(description: string, keywords: string[]): string {
+  const text = `${description} ${keywords.join(" ")}`.toLowerCase();
+  if (/\b(luxury|premium|exclusive|boutique|crafted)\b/.test(text)) {
+    return "premium and polished";
+  }
+  if (/\b(fast|instant|simple|easy|modern|tech|software)\b/.test(text)) {
+    return "modern and direct";
+  }
+  if (/\b(family|local|care|community|trusted)\b/.test(text)) {
+    return "warm and trustworthy";
+  }
+  return "confident and approachable";
+}
+
+function inferDifferentiators(
+  description: string,
+  headline: string,
+  keywords: string[],
+): string[] {
+  const source = collapse(stripTags(`${headline}. ${description}`));
+  const differentiators = new Set<string>();
+
+  for (const phrase of source.split(/[.;:|]/)) {
+    const clean = phrase.trim();
+    if (
+      clean.length >= 12 &&
+      clean.length <= 70 &&
+      DIFFERENTIATOR_HINTS.some((hint) => clean.toLowerCase().includes(hint))
+    ) {
+      differentiators.add(clean);
+    }
+  }
+
+  for (const keyword of keywords) {
+    if (differentiators.size >= 4) break;
+    differentiators.add(keyword);
+  }
+
+  return [...differentiators].slice(0, 4);
+}
+
+function inferCta(description: string, headline: string): string {
+  const text = `${headline} ${description}`.toLowerCase();
+  if (/\b(book|appointment|reservation|schedule)\b/.test(text))
+    return "Book Now";
+  if (/\b(shop|store|buy|order)\b/.test(text)) return "Shop Now";
+  if (/\b(quote|estimate|consultation)\b/.test(text)) return "Get a Quote";
+  if (/\b(demo|trial|platform|software|app)\b/.test(text))
+    return "Request Demo";
+  if (/\b(menu|restaurant|coffee|food)\b/.test(text)) return "View Menu";
+  return "Get Started";
+}
+
 // --- small HTML helpers -----------------------------------------------------
 
 function firstHeading(html: string): string | undefined {
@@ -328,17 +451,49 @@ function isNeutral(hex: string): boolean {
   return max - min < 24;
 }
 
-function fallbackProfile(name: string): BrandProfile {
+function fallbackProfile(name: string, websiteUrl: string): BrandProfile {
   return {
     name,
     description: `${name} — brand summary unavailable (site could not be read); using defaults.`,
     colors: ["#111111", "#F4C542", "#FFFFFF"],
     logoUrl: null,
+    websiteUrl,
     screenshotPath: null,
     headlineText: `Welcome to ${name}`,
     keywords: ["premium", "local", "fast", "modern"],
+    audience: "local customers ready to take action",
+    offer: "trusted local service",
+    category: "business",
+    tone: "confident and approachable",
+    differentiators: ["premium", "local", "fast", "modern"],
+    requiredCta: "Get Started",
   };
 }
+
+const CATEGORY_HINTS: Array<[string, string[]]> = [
+  ["software", ["software", "saas", "platform", "api", "developer"]],
+  ["restaurant", ["restaurant", "menu", "food", "coffee", "bakery", "bar"]],
+  ["retail", ["shop", "store", "retail", "fashion", "apparel", "product"]],
+  ["healthcare", ["health", "clinic", "dental", "wellness", "therapy"]],
+  ["fitness", ["fitness", "gym", "training", "workout", "yoga"]],
+  ["real estate", ["real estate", "property", "homes", "mortgage"]],
+  ["professional services", ["agency", "consulting", "law", "accounting"]],
+];
+
+const DIFFERENTIATOR_HINTS = [
+  "free",
+  "fast",
+  "same",
+  "premium",
+  "trusted",
+  "award",
+  "local",
+  "custom",
+  "expert",
+  "simple",
+  "modern",
+  "secure",
+];
 
 const STOP_WORDS = new Set([
   "the",

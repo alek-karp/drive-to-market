@@ -1,20 +1,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { buildAdPrompt } from "./generateAdPrompt";
-import type { BrandProfile, WrapDesign } from "./types";
+import { buildAdBackgroundPrompt, buildAdConcepts } from "./generateAdPrompt";
+import type { AdConcept, BrandProfile, WrapDesign } from "./types";
 
 /**
- * Real AI ad generation via xAI's Grok image model.
+ * AI-assisted ad generation.
  *
- * This is the first live image-model integration in the pipeline. Everywhere
- * else the demo fabricates wrap graphics procedurally (see
- * {@link ./generateWrapGraphics}); here we actually call Grok to generate a
- * single advertising graphic from the brand profile and apply it to the car.
- *
- * The returned {@link WrapDesign} points its decal *and* pattern at the one
- * generated image, so Stage 7 ({@link ../components/CarModel}) paints it onto
- * every body part directly — no Stage 6 composition needed for this test path.
+ * The image model creates background art only. Copy strategy is generated
+ * first and candidate backgrounds are ranked. Final copy is composited
+ * deterministically after generation so brand text stays controlled.
  */
 export async function generateAdDesign(
   brand: BrandProfile,
@@ -26,18 +21,41 @@ export async function generateAdDesign(
     );
   }
 
-  const prompt = buildAdPrompt(brand);
-  const { b64, revisedPrompt } = await requestGrokImage(apiKey, prompt);
+  const candidateCount = resolveCandidateCount();
+  const concepts = buildAdConcepts(brand, candidateCount);
+  const batches = concepts.slice(0, 2);
+  const n = Math.max(2, Math.ceil(candidateCount / batches.length));
+
+  const generated = (
+    await Promise.all(
+      batches.map(async (concept) => {
+        const prompt = buildAdBackgroundPrompt(brand, concept);
+        const images = await requestGrokImages(apiKey, prompt, n);
+        return images.map((image, index): AdCandidate => {
+          return {
+            id: `${concept.id}-${index + 1}`,
+            concept,
+            b64: image.b64,
+            revisedPrompt: image.revisedPrompt,
+            score: rankCandidate(concept, image.revisedPrompt),
+          };
+        });
+      }),
+    )
+  )
+    .flat()
+    .slice(0, candidateCount);
+
+  const winner = generated.sort((a, b) => b.score - a.score)[0];
+  if (!winner) throw new Error("Grok returned no image data.");
 
   const id = `${slug(brand.name)}-ai-ad`;
-  const adUrl = await saveAd(id, b64);
+  const adUrl = await saveAd(id, winner, brand);
 
   return {
     id,
     style: "AI Ad",
-    description: revisedPrompt
-      ? truncate(revisedPrompt, 90)
-      : "Live ad generated from your brand by Grok.",
+    description: `${winner.concept.hook} · ${winner.concept.cta}`,
     baseColor: brand.colors[0] ?? "#111111",
     graphics: { decalUrl: adUrl, patternUrl: adUrl },
     textures: {},
@@ -47,17 +65,26 @@ export async function generateAdDesign(
 /** Where Grok's image model is reached. Overridable for self-hosting/tests. */
 const XAI_BASE_URL = process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
 const XAI_IMAGE_MODEL = process.env.XAI_IMAGE_MODEL ?? "grok-imagine-image";
+const OUTPUT_W = 2048;
+const OUTPUT_H = 1024;
 
 interface GrokImage {
   b64: string;
   revisedPrompt?: string;
 }
 
-/** Call xAI's OpenAI-compatible image endpoint and return the first image. */
-async function requestGrokImage(
+interface AdCandidate extends GrokImage {
+  id: string;
+  concept: AdConcept;
+  score: number;
+}
+
+/** Call xAI's OpenAI-compatible image endpoint and return all images. */
+async function requestGrokImages(
   apiKey: string,
   prompt: string,
-): Promise<GrokImage> {
+  n: number,
+): Promise<GrokImage[]> {
   const res = await fetch(`${XAI_BASE_URL}/images/generations`, {
     method: "POST",
     headers: {
@@ -67,7 +94,7 @@ async function requestGrokImage(
     body: JSON.stringify({
       model: XAI_IMAGE_MODEL,
       prompt,
-      n: 1,
+      n,
       response_format: "b64_json",
     }),
   });
@@ -82,12 +109,16 @@ async function requestGrokImage(
   const json = (await res.json()) as {
     data?: Array<{ b64_json?: string; revised_prompt?: string }>;
   };
-  const first = json.data?.[0];
-  if (!first?.b64_json) {
-    throw new Error("Grok returned no image data.");
-  }
+  const images =
+    json.data
+      ?.filter((entry) => entry.b64_json)
+      .map((entry) => ({
+        b64: entry.b64_json as string,
+        revisedPrompt: entry.revised_prompt,
+      })) ?? [];
 
-  return { b64: first.b64_json, revisedPrompt: first.revised_prompt };
+  if (images.length === 0) throw new Error("Grok returned no image data.");
+  return images;
 }
 
 const GENERATED_DIR = path.join(
@@ -97,16 +128,97 @@ const GENERATED_DIR = path.join(
   "generated",
 );
 
-/**
- * Normalize Grok's image to PNG (it may return JPEG) and write it under the
- * design's generated folder. Returns the public URL Stage 7 loads.
- */
-async function saveAd(designId: string, b64: string): Promise<string> {
+async function saveAd(
+  designId: string,
+  winner: AdCandidate,
+  brand: BrandProfile,
+): Promise<string> {
   const dir = path.join(GENERATED_DIR, designId);
   await mkdir(dir, { recursive: true });
-  const png = await sharp(Buffer.from(b64, "base64")).png().toBuffer();
-  await writeFile(path.join(dir, "ad.png"), png);
+
+  await writeFile(path.join(dir, "ad.png"), await renderAd(winner, brand));
   return `/textures/generated/${designId}/ad.png`;
+}
+
+function normalizeBackground(b64: string): Promise<Buffer> {
+  return sharp(Buffer.from(b64, "base64"))
+    .resize(OUTPUT_W, OUTPUT_H, { fit: "cover" })
+    .png()
+    .toBuffer();
+}
+
+async function renderAd(
+  winner: AdCandidate,
+  brand: BrandProfile,
+): Promise<Buffer> {
+  const background = await normalizeBackground(winner.b64);
+  const overlay = Buffer.from(adTextOverlaySvg(winner.concept, brand));
+  return sharp(background)
+    .composite([{ input: overlay, top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+}
+
+function adTextOverlaySvg(concept: AdConcept, brand: BrandProfile): string {
+  const align = concept.focalArea === "right" ? "right" : "left";
+  const x = align === "right" ? OUTPUT_W - 140 : 140;
+  const anchor = align === "right" ? "end" : "start";
+  const ink = readableInk(brand.colors[0] ?? "#111111");
+  const accent = brand.colors[1] ?? brand.colors[0] ?? "#FFFFFF";
+  const brandName = esc(brand.name.toUpperCase());
+  const hook = esc(concept.hook);
+  const subheader = esc(concept.subheader);
+  const cta = esc(concept.cta);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${OUTPUT_W}" height="${OUTPUT_H}" viewBox="0 0 ${OUTPUT_W} ${OUTPUT_H}">
+    <rect x="${align === "right" ? OUTPUT_W - 178 : 140}" y="568" width="38" height="6" rx="3" fill="${accent}"/>
+    <text x="${x}" y="330" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="5" fill="${ink}" opacity="0.9">${brandName}</text>
+    <text x="${x}" y="415" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="72" font-weight="800" letter-spacing="0" fill="${ink}">${hook}</text>
+    <text x="${x}" y="490" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="36" font-weight="500" letter-spacing="0" fill="${ink}" opacity="0.88">${subheader}</text>
+    <text x="${x}" y="570" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="2" fill="${ink}">${cta}</text>
+  </svg>`;
+}
+
+function rankCandidate(concept: AdConcept, revisedPrompt?: string): number {
+  const prompt = revisedPrompt?.toLowerCase() ?? "";
+  const textPenalty = /\b(text|word|letter|logo|typography|slogan)\b/.test(
+    prompt,
+  )
+    ? 12
+    : 0;
+  const compositionBonus = /\b(clean|space|contrast|vector|abstract)\b/.test(
+    prompt,
+  )
+    ? 6
+    : 0;
+
+  return concept.score + compositionBonus - textPenalty;
+}
+
+function resolveCandidateCount(): number {
+  const raw = Number.parseInt(process.env.XAI_AD_CANDIDATES ?? "4", 10);
+  if (Number.isNaN(raw)) return 4;
+  return Math.max(4, Math.min(8, raw));
+}
+
+/** Black or white text, whichever reads better on the base coat. */
+function readableInk(baseColor: string): string {
+  const m = baseColor.replace("#", "");
+  const n = Number.parseInt(
+    m.length === 3
+      ? m
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : m,
+    16,
+  );
+  if (Number.isNaN(n)) return "#FFFFFF";
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance > 0.6 ? "#111111" : "#FFFFFF";
 }
 
 function slug(s: string): string {
@@ -119,7 +231,11 @@ function slug(s: string): string {
   );
 }
 
-function truncate(s: string, max: number): string {
-  const t = s.trim();
-  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

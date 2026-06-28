@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# generated assets
+/public/textures/generated/
+
 # production
 /build
 

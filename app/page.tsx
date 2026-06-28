@@ -41,18 +41,16 @@ const CarViewer = dynamic(
 
 const loadingSteps = [
   "Reading website",
-  "Extracting brand colors",
+  "Extracting brand strategy",
   "Creating vehicle wrap",
-  "Generating AI ad (Grok)",
+  "Generating AI ad candidates",
   "Applying design to car",
   "Preparing 3D preview",
 ] as const;
 
 type Status = "idle" | "loading" | "ready" | "error";
-type FlowMode = "basic" | "advanced";
 
 export default function Home() {
-  const [flow, setFlow] = useState<FlowMode>("basic");
   const [status, setStatus] = useState<Status>("idle");
   const [stepIndex, setStepIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -63,11 +61,8 @@ export default function Home() {
   const [showCity, setShowCity] = useState(false);
 
   const selectedDesign = designs.find((d) => d.id === selectedId) ?? null;
-  const advancedSelected = flow === "advanced";
 
   async function handleSubmit(url: string) {
-    if (advancedSelected) return;
-
     setStatus("loading");
     setError(null);
     setAiNotice(null);
@@ -92,7 +87,8 @@ export default function Home() {
       const nextDesigns = designRes.designs as WrapDesign[];
       setDesigns(nextDesigns);
 
-      // Live ad generation: brand -> one Grok-generated ad applied to the car.
+      // Live ad generation: brand -> one Grok-generated background with our
+      // controlled text/logo layer composited after generation.
       // Non-fatal — if the integration fails (e.g. no API key), keep the
       // procedural concepts so the rest of the demo still works.
       setStepIndex(3);
@@ -107,8 +103,7 @@ export default function Home() {
         );
       }
 
-      // Stage 6: compose per-part textures for the first procedural concept so
-      // it's ready when picked. The AI ad is applied to the car as-is.
+      // Stage 6: compose per-part textures for the first procedural concept.
       setStepIndex(4);
       const first = nextDesigns[0] ?? null;
       if (first) {
@@ -157,54 +152,31 @@ export default function Home() {
               <>
                 <Card size="sm">
                   <CardHeader>
-                    <CardTitle>Flow</CardTitle>
+                    <CardTitle>Ad pipeline</CardTitle>
                     <CardDescription>
-                      Basic uses the current generator. Advanced is planned but
-                      not implemented yet.
+                      Extracts strategy, generates multiple AI backgrounds,
+                      ranks candidates, and overlays readable copy
+                      deterministically.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant={flow === "basic" ? "default" : "outline"}
-                      onClick={() => setFlow("basic")}
-                      disabled={status === "loading"}
-                    >
-                      Basic
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={flow === "advanced" ? "default" : "outline"}
-                      onClick={() => setFlow("advanced")}
-                      disabled={status === "loading"}
-                    >
-                      Advanced
-                    </Button>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-1.5">
+                      {["Strategy", "4 candidates", "Ranked", "Composited"].map(
+                        (item) => (
+                          <Badge key={item} variant="secondary">
+                            {item}
+                          </Badge>
+                        ),
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
 
                 <UrlInput
                   onSubmit={handleSubmit}
-                  disabled={status === "loading" || advancedSelected}
-                  submitLabel={advancedSelected ? "Coming Soon" : "Generate"}
-                  placeholder={
-                    advancedSelected
-                      ? "Advanced flow is not available yet"
-                      : "https://example.com"
-                  }
+                  disabled={status === "loading"}
                 />
               </>
-            )}
-
-            {advancedSelected && status !== "loading" && status !== "ready" && (
-              <Alert>
-                <AlertTitle>Advanced flow not available</AlertTitle>
-                <AlertDescription>
-                  The advanced path will cover strategy, multiple concepts,
-                  scoring, and composition. For now, only the current basic flow
-                  runs.
-                </AlertDescription>
-              </Alert>
             )}
 
             {status === "loading" && <LoadingSteps activeIndex={stepIndex} />}
@@ -230,15 +202,22 @@ export default function Home() {
                   <CardDescription>{brand.description}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex gap-1.5">
-                    {brand.colors.map((c) => (
-                      <span
-                        key={c}
-                        title={c}
-                        className="size-5 rounded border border-border"
-                        style={{ backgroundColor: c }}
-                      />
-                    ))}
+                  <div className="space-y-4">
+                    <div className="flex gap-1.5">
+                      {brand.colors.map((c) => (
+                        <span
+                          key={c}
+                          title={c}
+                          className="size-5 rounded border border-border"
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <ProfileFact label="Audience" value={brand.audience} />
+                      <ProfileFact label="Offer" value={brand.offer} />
+                      <ProfileFact label="CTA" value={brand.requiredCta} />
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -385,6 +364,19 @@ function ViewerFallback({ label }: { label: string }) {
           <Skeleton className="aspect-video w-full" />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ProfileFact({ label, value }: { label: string; value: string }) {
+  if (!value) return null;
+
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p>{value}</p>
     </div>
   );
 }

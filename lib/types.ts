@@ -7,9 +7,27 @@ export interface BrandProfile {
   /** Primary first, then accents. Hex strings. */
   colors: string[];
   logoUrl: string | null;
+  websiteUrl: string | null;
   screenshotPath: string | null;
   headlineText: string;
   keywords: string[];
+  audience: string;
+  offer: string;
+  category: string;
+  tone: string;
+  differentiators: string[];
+  requiredCta: string;
+}
+
+/** Deterministic marketing plan used before asking an image model for art. */
+export interface AdConcept {
+  id: string;
+  hook: string;
+  subheader: string;
+  cta: string;
+  visualDirection: string;
+  focalArea: "left" | "center" | "right";
+  score: number;
 }
 
 /** Raw wrap graphics generated for a concept (Stage 5). */
