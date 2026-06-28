@@ -42,7 +42,6 @@ const CarViewer = dynamic(
 const loadingSteps = [
   "Reading website",
   "Extracting brand strategy",
-  "Creating vehicle wrap",
   "Generating AI ad candidates",
   "Applying design to car",
   "Preparing 3D preview",
@@ -54,7 +53,6 @@ export default function Home() {
   const [status, setStatus] = useState<Status>("idle");
   const [stepIndex, setStepIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [aiNotice, setAiNotice] = useState<string | null>(null);
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [designs, setDesigns] = useState<WrapDesign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -65,7 +63,6 @@ export default function Home() {
   async function handleSubmit(url: string) {
     setStatus("loading");
     setError(null);
-    setAiNotice(null);
     setStepIndex(0);
     setBrand(null);
     setDesigns([]);
@@ -79,69 +76,28 @@ export default function Home() {
       setStepIndex(1);
       await delay(400);
 
-      // Stage 5: brand -> wrap concepts + AI-derived pattern texture (parallel).
+      // Stage 5: brand -> Grok-generated ad background with our controlled
+      // company-name layer composited after generation.
       setStepIndex(2);
-      const [designRes, patternRes] = await Promise.all([
-        postJson("/api/generate-design", { brand: nextBrand }),
-        postJson("/api/pattern", { brand: nextBrand }).catch(() => null),
-      ]);
-      const patternUrl = (
-        patternRes as { pattern?: { textureUrl?: string } } | null
-      )?.pattern?.textureUrl;
-      const nextDesigns = (designRes.designs as WrapDesign[]).map((d) =>
-        patternUrl ? { ...d, graphics: { ...d.graphics, patternUrl } } : d,
-      );
-      setDesigns(nextDesigns);
+      const adRes = await postJson("/api/generate-ad", { brand: nextBrand });
+      const aiDesign = adRes.design as WrapDesign;
+      setDesigns([aiDesign]);
 
-      // Live ad generation: brand -> one Grok-generated background with our
-      // controlled text/logo layer composited after generation.
-      // Non-fatal — if the integration fails (e.g. no API key), keep the
-      // procedural concepts so the rest of the demo still works.
+      // Stage 6: compose per-part textures, blending the ad over the base coat.
       setStepIndex(3);
-      let aiDesign: WrapDesign | null = null;
-      try {
-        const adRes = await postJson("/api/generate-ad", { brand: nextBrand });
-        aiDesign = adRes.design as WrapDesign;
-        setDesigns((prev) => [aiDesign as WrapDesign, ...prev]);
-      } catch (e) {
-        setAiNotice(
-          e instanceof Error ? e.message : "Grok ad generation failed",
-        );
-      }
-
-      // Stage 6: compose per-part textures before selecting a design. The AI
-      // ad can be mostly white, so it must be blended over the primary base
-      // coat before it is applied to the car.
-      setStepIndex(4);
-      const first = nextDesigns[0] ?? null;
-      const designsToCompose = [aiDesign, first].filter(
-        (design): design is WrapDesign => design !== null,
-      );
-      const composed = await Promise.all(
-        designsToCompose.map(async (design) => {
-          const composeRes = await postJson("/api/compose-textures", {
-            design,
-            brand: nextBrand,
-          });
-          return {
-            id: design.id,
-            textures: composeRes.textures as WrapDesign["textures"],
-          };
-        }),
-      );
-      if (composed.length > 0) {
-        setDesigns((prev) =>
-          prev.map((design) => {
-            const match = composed.find(({ id }) => id === design.id);
-            return match ? { ...design, textures: match.textures } : design;
-          }),
-        );
-      }
-      // Prefer the AI ad on the car; fall back to the first procedural concept.
-      setSelectedId(aiDesign?.id ?? first?.id ?? null);
+      const composeRes = await postJson("/api/compose-textures", {
+        design: aiDesign,
+        brand: nextBrand,
+      });
+      const composedDesign = {
+        ...aiDesign,
+        textures: composeRes.textures as WrapDesign["textures"],
+      };
+      setDesigns([composedDesign]);
+      setSelectedId(composedDesign.id);
       await delay(400);
 
-      setStepIndex(5);
+      setStepIndex(4);
       await delay(400);
 
       setStatus("ready");
@@ -206,13 +162,6 @@ export default function Home() {
               <Alert variant="destructive">
                 <AlertTitle>Unable to generate wrap</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {aiNotice && status !== "loading" && (
-              <Alert>
-                <AlertTitle>AI ad unavailable</AlertTitle>
-                <AlertDescription>{aiNotice}</AlertDescription>
               </Alert>
             )}
 

@@ -67,21 +67,6 @@ export interface WrapDesign {
   textures: Partial<Record<PaintablePart, string>>;
 }
 
-/** Stage 3: decorative overlay applied on top of the base color. */
-export type PatternType =
-  | "none"
-  | "stripes"
-  | "gradient"
-  | "abstract"
-  | "branded";
-
-/** Stage 3 output: chosen pattern + the generated texture URL (empty string when type is "none"). */
-export interface Pattern {
-  type: PatternType;
-  /** Public URL to the generated SVG texture, or "" when type is "none". */
-  textureUrl: string;
-}
-
 /** Mesh/material names of the paintable parts on the prepared car model. */
 export type PaintablePart =
   | "door_left"
