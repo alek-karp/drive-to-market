@@ -110,7 +110,6 @@ function renderDecal(style: WrapStyle, p: Palette): string {
         <stop offset="100%" stop-color="${shade(p.base, 0.08)}"/>
       </linearGradient>
     </defs>
-    <rect width="${DECAL_W}" height="${DECAL_H}" fill="${p.base}"/>
     ${body}`,
   );
 }
@@ -133,11 +132,7 @@ function renderPattern(style: WrapStyle, p: Palette): string {
     Tech: () => hexField(PATTERN, PATTERN, p.accent),
   }[style]();
 
-  return svgDoc(
-    PATTERN,
-    PATTERN,
-    `<rect width="${PATTERN}" height="${PATTERN}" fill="${p.base}"/>${body}`,
-  );
+  return svgDoc(PATTERN, PATTERN, body);
 }
 
 function svgDoc(w: number, h: number, inner: string): string {

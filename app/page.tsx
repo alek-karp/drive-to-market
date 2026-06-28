@@ -103,17 +103,32 @@ export default function Home() {
         );
       }
 
-      // Stage 6: compose per-part textures for the first procedural concept.
+      // Stage 6: compose per-part textures before selecting a design. The AI
+      // ad can be mostly white, so it must be blended over the primary base
+      // coat before it is applied to the car.
       setStepIndex(4);
       const first = nextDesigns[0] ?? null;
-      if (first) {
-        const composeRes = await postJson("/api/compose-textures", {
-          design: first,
-          brand: nextBrand,
-        });
-        const textures = composeRes.textures as WrapDesign["textures"];
+      const designsToCompose = [aiDesign, first].filter(
+        (design): design is WrapDesign => design !== null,
+      );
+      const composed = await Promise.all(
+        designsToCompose.map(async (design) => {
+          const composeRes = await postJson("/api/compose-textures", {
+            design,
+            brand: nextBrand,
+          });
+          return {
+            id: design.id,
+            textures: composeRes.textures as WrapDesign["textures"],
+          };
+        }),
+      );
+      if (composed.length > 0) {
         setDesigns((prev) =>
-          prev.map((d) => (d.id === first.id ? { ...d, textures } : d)),
+          prev.map((design) => {
+            const match = composed.find(({ id }) => id === design.id);
+            return match ? { ...design, textures: match.textures } : design;
+          }),
         );
       }
       // Prefer the AI ad on the car; fall back to the first procedural concept.

@@ -13,8 +13,9 @@ import type { BrandProfile, PaintablePart, WrapDesign } from "./types";
  * texture per paintable car part.
  *
  * This is the "product magic": instead of slapping one image on the car, we
- * composite a fixed-dimension texture for each part — base coat + the generated
- * wrap graphic + a crisp company-name lockup rendered as text. Per the demo
+ * composite a fixed-dimension texture for each part: full base coat, then the
+ * generated wrap graphic, then a crisp company-name lockup rendered as text.
+ * Per the demo
  * plan, text is drawn here with SVG (never relied on from an image model) so
  * the brand name always stays legible.
  *
@@ -64,19 +65,27 @@ async function composePart(
   const graphicUrl = SIDE_PARTS.has(part)
     ? design.graphics.decalUrl
     : design.graphics.patternUrl;
+  const baseColor = brand?.colors[0] ?? design.baseColor;
 
-  // The Stage 5 graphic is an opaque, full-canvas SVG (base coat + motif), so
-  // it doubles as the texture background. Rasterize it to the part's exact size.
-  const graphicSvg = await readFile(publicPathToFs(graphicUrl));
-  const texture = sharp(graphicSvg, { density: 200 }).resize(
-    cfg.width,
-    cfg.height,
-    { fit: "fill" },
-  );
+  // Always start with a solid base coat so sparse or transparent graphics never
+  // reveal the model's default paint. Then apply the generated graphic over it.
+  const graphicSource = await readFile(publicPathToFs(graphicUrl));
+  const graphic = await sharp(graphicSource, { density: 200 })
+    .resize(cfg.width, cfg.height, { fit: "fill" })
+    .png()
+    .toBuffer();
+  const texture = sharp({
+    create: {
+      width: cfg.width,
+      height: cfg.height,
+      channels: 4,
+      background: baseColor,
+    },
+  }).composite([{ input: graphic, top: 0, left: 0, blend: "multiply" }]);
 
   // Overlay a company-name lockup wherever the part config anchors a logo.
   if (brand && cfg.logoPosition) {
-    const overlay = Buffer.from(lockupSvg(cfg, design.baseColor, brand));
+    const overlay = Buffer.from(lockupSvg(cfg, baseColor, brand));
     texture.composite([{ input: overlay, top: 0, left: 0 }]);
   }
 
@@ -109,8 +118,6 @@ function lockupSvg(
   const centered = width === height;
 
   const ink = readableInk(baseColor);
-  const plate =
-    ink === "#FFFFFF" ? "rgba(0,0,0,0.30)" : "rgba(255,255,255,0.32)";
 
   const nameSize = Math.round(height * 0.11);
   const tagSize = Math.round(height * 0.05);
@@ -118,18 +125,12 @@ function lockupSvg(
   const tagline = esc(truncate(brand.headlineText || brand.description, 42));
 
   const anchor = centered ? "middle" : "start";
-  // Backing plate spans the text block; sized generously and clipped softly.
-  const plateW = centered ? width * 0.8 : width * 0.42;
-  const plateH = nameSize + (tagline ? tagSize * 1.6 : 0) + nameSize * 0.7;
-  const plateX = centered ? (width - plateW) / 2 : x - nameSize * 0.35;
-  const plateY = y - nameSize;
 
   const taglineEl = tagline
     ? `<text x="${x}" y="${y + tagSize * 1.5}" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="${tagSize}" letter-spacing="${tagSize * 0.12}" fill="${ink}" opacity="0.85">${tagline}</text>`
     : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <rect x="${plateX.toFixed(0)}" y="${plateY.toFixed(0)}" width="${plateW.toFixed(0)}" height="${plateH.toFixed(0)}" rx="${(nameSize * 0.25).toFixed(0)}" fill="${plate}"/>
     <text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="${nameSize}" letter-spacing="${nameSize * 0.06}" fill="${ink}">${name}</text>
     ${taglineEl}
   </svg>`;

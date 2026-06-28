@@ -171,7 +171,6 @@ export function CarModel({
 
     const byPart = new Map<PaintablePart, MeshStandardMaterial[]>();
     const paintMeshes: Mesh[] = [];
-    const paintMaterials = new Set<MeshStandardMaterial>();
     const originalUvs = new Map<Mesh, Float32Array | null>();
     const stock = new Map<
       MeshStandardMaterial,
@@ -199,9 +198,6 @@ export function CarModel({
       }
       for (const material of materials) {
         if (!(material instanceof MeshStandardMaterial)) continue;
-        if (isPaintMaterial(material)) {
-          paintMaterials.add(material);
-        }
         if (!stock.has(material)) {
           stock.set(material, {
             color: material.color.clone(),
@@ -213,7 +209,7 @@ export function CarModel({
         byPart.set(part, list);
       }
     }
-    return { byPart, originalUvs, paintMaterials, paintMeshes, stock };
+    return { byPart, originalUvs, paintMeshes, stock };
   }, [meshCategory]);
 
   // Report which categories the model actually contains.
@@ -228,7 +224,7 @@ export function CarModel({
   // it loads. Designs whose textures haven't been composed fall back to the raw
   // Stage 5 decal/pattern. Clearing the design restores the model's stock paint.
   useEffect(() => {
-    const { byPart, originalUvs, paintMaterials, paintMeshes, stock } = body;
+    const { byPart, originalUvs, paintMeshes, stock } = body;
 
     if (!design) {
       restoreOriginalUvs(originalUvs);
@@ -242,6 +238,10 @@ export function CarModel({
 
     // Show the base coat immediately, then swap in each texture once it loads.
     restoreOriginalUvs(originalUvs);
+    const projectedTexture = isAiAdDesign(design);
+    if (projectedTexture) {
+      applyProjectedSideUvs(paintMeshes);
+    }
     const base = new Color(design.baseColor);
     for (const material of stock.keys()) {
       material.map = null;
@@ -251,31 +251,6 @@ export function CarModel({
         material.color.copy(base);
       }
       material.needsUpdate = true;
-    }
-
-    if (isAiAdDesign(design)) {
-      applyProjectedSideUvs(paintMeshes);
-
-      let cancelled = false;
-      const loader = new TextureLoader();
-      const texture = loader.load(design.graphics.decalUrl, (t) => {
-        if (cancelled) {
-          t.dispose();
-          return;
-        }
-        t.colorSpace = SRGBColorSpace;
-        t.flipY = true;
-        for (const material of paintMaterials) {
-          material.map = t;
-          material.color.set("#ffffff");
-          material.needsUpdate = true;
-        }
-      });
-
-      return () => {
-        cancelled = true;
-        texture.dispose();
-      };
     }
 
     let cancelled = false;
@@ -290,7 +265,7 @@ export function CarModel({
           return;
         }
         t.colorSpace = SRGBColorSpace;
-        t.flipY = false;
+        t.flipY = projectedTexture;
         for (const material of materials) {
           if (!isPaintMaterial(material)) continue;
           material.map = t;
