@@ -43,8 +43,12 @@ Two Tesla GLBs live in `public/models/`:
 
 | File | Mode | How ads are applied |
 |------|------|---------------------|
-| `tesla.glb` | Wrap mode | Textures UV-mapped onto body meshes via spatial part classification |
+| `tesla.glb` | Wrap mode | Body painted with the brand base coat; the AI ad is projected onto fixed panels as Three.js decals (see below). Legacy procedural concepts still UV-map composed textures per spatial part. |
 | `teslanew.glb` | Ad boards | Same body wrap **plus** textures applied to named `ad_anchor_*` plane meshes pre-positioned on each car surface (hood, left/right front doors, left/right back doors, trunk) |
+
+### Ad decals (AI Ad designs)
+
+`components/CarModel.tsx` (`applyAdDecals` / `buildDecal`) places the generated ad with `DecalGeometry` instead of stretching one texture across the body UVs. For each slot in `AD_DECAL_SLOTS` (left/right doors, left/right rear quarters, hood, trunk) it raycasts from outside the car to find a real surface point, then builds a decal clipped to a box whose footprint matches the ad's 2:1 aspect. The box clip keeps the artwork undistorted, conforms it to body curvature, and stops it bleeding onto glass/wheels. Slots are defined geometrically (normalized position + body extents), so they survive the scene's centering/scaling. Each decal is built in its target mesh's local frame — the mesh's world matrix is zeroed during construction, mirroring drei's `<Decal>` — then added as a child so the scene transform re-applies.
 
 The model registry lives in `lib/carModel.ts` (`CAR_MODELS`, `CarModelId`). The viewer shows a mode switcher; the selected model path is passed to `CarModel` as a prop. Both models share the same material names so the category/paint system works for both.
 

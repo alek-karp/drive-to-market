@@ -7,13 +7,18 @@ import {
   Box3,
   BufferAttribute,
   Color,
+  Euler,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
+  Quaternion,
+  Raycaster,
   SRGBColorSpace,
   type Texture,
   TextureLoader,
   Vector3,
 } from "three";
+import { DecalGeometry } from "three/examples/jsm/geometries/DecalGeometry.js";
 import {
   type CarPartCategory,
   categoryForMaterial,
@@ -245,12 +250,10 @@ export function CarModel({
       return;
     }
 
-    // Show the base coat immediately, then swap in each texture once it loads.
+    // Paint the whole body in the brand base coat. The ad is no longer baked
+    // into the body texture — it is projected on as decals (below), so the body
+    // only needs the right color/finish underneath each placement.
     restoreOriginalUvs(originalUvs);
-    const projectedTexture = isAiAdDesign(design);
-    if (projectedTexture) {
-      applyProjectedSideUvs(paintMeshes);
-    }
     const base = new Color(design.baseColor);
     for (const [material] of stock) {
       material.map = null;
@@ -264,6 +267,16 @@ export function CarModel({
       material.needsUpdate = true;
     }
 
+    // The AI ad goes on as projected decals over specific panels so the artwork
+    // keeps its aspect ratio, conforms to body curvature, and never spills onto
+    // glass or wheels.
+    if (isAiAdDesign(design)) {
+      return applyAdDecals(paintMeshes, design.graphics.decalUrl, design);
+    }
+
+    // Legacy per-part wrap textures (procedural concepts). Each logical part
+    // gets its own composed texture as the material map, falling back to the raw
+    // Stage 5 graphic when a part hasn't been composed yet.
     let cancelled = false;
     const loader = new TextureLoader();
     const loaded: Texture[] = [];
@@ -276,7 +289,7 @@ export function CarModel({
           return;
         }
         t.colorSpace = SRGBColorSpace;
-        t.flipY = projectedTexture;
+        t.flipY = false;
         for (const material of materials) {
           if (!isPaintMaterial(material)) continue;
           material.map = t;
@@ -338,40 +351,224 @@ function restoreOriginalUvs(originalUvs: Map<Mesh, Float32Array | null>): void {
   }
 }
 
-function applyProjectedSideUvs(meshes: Mesh[]): void {
+/** Aspect ratio of the generated ad (2048×1024). Decal footprints match it so
+ *  the artwork is never stretched. */
+const AD_ASPECT = 2;
+
+/**
+ * An ad placement, described geometrically so it works on any car the scene
+ * centers/scales. `along` runs 0 (rear) → 1 (front); `side` is -1 (left),
+ * +1 (right), or 0 (top, centered on width).
+ */
+interface DecalSlot {
+  along: number;
+  side: -1 | 0 | 1;
+  surface: "side" | "top" | "rear";
+  /** Side/rear slots: normalized height up the body (0 floor → 1 roof). */
+  heightFrac?: number;
+  /** Decal width as a fraction of the body's length (sides) or width (tops/rear). */
+  widthFrac: number;
+}
+
+const AD_DECAL_SLOTS: DecalSlot[] = [
+  { along: 0.6, side: -1, surface: "side", heightFrac: 0.46, widthFrac: 0.34 },
+  { along: 0.6, side: 1, surface: "side", heightFrac: 0.46, widthFrac: 0.34 },
+  { along: 0.32, side: -1, surface: "side", heightFrac: 0.46, widthFrac: 0.3 },
+  { along: 0.32, side: 1, surface: "side", heightFrac: 0.46, widthFrac: 0.3 },
+  { along: 0.8, side: 0, surface: "top", widthFrac: 0.55 },
+  { side: 0, surface: "rear", along: 0, heightFrac: 0.42, widthFrac: 0.4 },
+];
+
+/**
+ * Project the AI ad onto fixed-size panels as Three.js decals.
+ *
+ * Each slot raycasts from outside the car toward a panel to find a real surface
+ * point, then builds a {@link DecalGeometry} clipped to a box whose footprint
+ * matches the ad's aspect ratio. Because the box clips the projection, the decal
+ * conforms to body curvature, never spills onto glass/wheels, and keeps the
+ * artwork undistorted. Each decal is built in its target mesh's local frame
+ * (its world matrix is zeroed during construction, the way drei's `<Decal>`
+ * does it) so the scene's centering/scaling re-applies when it is added as a
+ * child.
+ *
+ * Returns a cleanup that detaches and disposes every decal.
+ */
+function applyAdDecals(
+  meshes: Mesh[],
+  textureUrl: string,
+  design: WrapDesign,
+): () => void {
+  if (meshes.length === 0) return () => {};
+
+  for (const mesh of meshes) mesh.updateWorldMatrix(true, false);
+
   const bounds = new Box3();
-  for (const mesh of meshes) {
-    mesh.updateWorldMatrix(true, false);
-    bounds.union(new Box3().setFromObject(mesh));
-  }
+  for (const mesh of meshes) bounds.union(new Box3().setFromObject(mesh));
+  if (bounds.isEmpty()) return () => {};
 
-  const size = bounds.getSize(new Vector3());
   const min = bounds.min;
-  const midX = min.x + size.x / 2;
-  const vertex = new Vector3();
-  const spanZ = size.z || 1;
-  const spanY = size.y || 1;
+  const max = bounds.max;
+  const size = bounds.getSize(new Vector3());
+  const center = bounds.getCenter(new Vector3());
+  const lengthAxis: "x" | "z" = size.x >= size.z ? "x" : "z";
+  const widthAxis: "x" | "z" = lengthAxis === "x" ? "z" : "x";
 
-  for (const mesh of meshes) {
-    const position = mesh.geometry.getAttribute("position");
-    if (!position) continue;
+  const raycaster = new Raycaster();
+  const decals: Mesh[] = [];
 
-    // The decal is planar-projected along world Z, so both sides sample U from
-    // the same z. Viewed from outside, the two sides face opposite directions,
-    // so that single mapping reads mirrored on the −X side. This body is a few
-    // large meshes that each span the full width, so we decide the flip
-    // per-vertex by which side of the centerline it sits on — flipping U on the
-    // −X half makes text run left-to-right on both the driver and passenger
-    // sides.
-    const uv = new Float32Array(position.count * 2);
-    for (let i = 0; i < position.count; i++) {
-      vertex.fromBufferAttribute(position, i);
-      mesh.localToWorld(vertex);
-      const u = (vertex.z - min.z) / spanZ;
-      uv[i * 2] = vertex.x > midX ? 1 - u : u;
-      uv[i * 2 + 1] = (vertex.y - min.y) / spanY;
+  for (const slot of AD_DECAL_SLOTS) {
+    const origin = new Vector3();
+    const direction = new Vector3();
+    const normalWorld = new Vector3();
+    const upWorld = new Vector3();
+    origin[lengthAxis] = min[lengthAxis] + slot.along * size[lengthAxis];
+
+    if (slot.surface === "side") {
+      const outward = slot.side < 0 ? -1 : 1;
+      origin.y = min.y + (slot.heightFrac ?? 0.45) * size.y;
+      origin[widthAxis] = center[widthAxis] + outward * size[widthAxis];
+      direction[widthAxis] = -outward; // aim inward at the panel
+      normalWorld[widthAxis] = outward; // the panel faces outward
+      upWorld.set(0, 1, 0); // text stays upright
+    } else if (slot.surface === "rear") {
+      // The tailgate is a near-vertical surface at the back facing −length.
+      origin.y = min.y + (slot.heightFrac ?? 0.42) * size.y;
+      origin[widthAxis] = center[widthAxis];
+      origin[lengthAxis] = min[lengthAxis] - size[lengthAxis]; // behind the car
+      direction[lengthAxis] = 1; // aim forward at the tailgate
+      normalWorld[lengthAxis] = -1; // the tailgate faces rearward
+      upWorld.set(0, 1, 0); // text stays upright
+    } else {
+      origin.y = max.y + size.y;
+      origin[widthAxis] = center[widthAxis];
+      direction.y = -1;
+      normalWorld.set(0, 1, 0);
+      // Point the text top toward the car's center so it reads upright when
+      // viewed from the front (hood → toward the windshield).
+      upWorld[lengthAxis] = slot.along > 0.5 ? -1 : 1;
     }
 
-    mesh.geometry.setAttribute("uv", new BufferAttribute(uv, 2));
+    raycaster.set(origin, direction.normalize());
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    if (!hit?.face) continue;
+
+    const widthWorld =
+      slot.widthFrac *
+      (slot.surface === "side" ? size[lengthAxis] : size[widthAxis]);
+    // Keep the box shallow along the projection normal so it grabs only the
+    // near panel, never the far side of the body.
+    const depthWorld =
+      slot.surface === "side"
+        ? 0.4 * size[widthAxis]
+        : slot.surface === "rear"
+          ? 0.12 * size[lengthAxis]
+          : 0.4 * size.y;
+
+    const decal = buildDecal(
+      hit.object as Mesh,
+      hit.point,
+      normalWorld,
+      upWorld,
+      {
+        width: widthWorld,
+        height: widthWorld / AD_ASPECT,
+        depth: depthWorld,
+      },
+    );
+    if (!decal) continue;
+
+    const material = decal.material as MeshStandardMaterial;
+    material.color.copy(new Color(design.baseColor));
+    material.metalness = design.metalness;
+    material.roughness = design.roughness;
+    (hit.object as Mesh).add(decal);
+    decals.push(decal);
   }
+
+  let cancelled = false;
+  const loader = new TextureLoader();
+  const texture = loader.load(textureUrl, (t) => {
+    if (cancelled) {
+      t.dispose();
+      return;
+    }
+    t.colorSpace = SRGBColorSpace;
+    for (const decal of decals) {
+      const material = decal.material as MeshStandardMaterial;
+      material.map = t;
+      material.color.set("#ffffff");
+      material.needsUpdate = true;
+    }
+  });
+
+  return () => {
+    cancelled = true;
+    texture.dispose();
+    for (const decal of decals) {
+      decal.parent?.remove(decal);
+      decal.geometry.dispose();
+      const material = decal.material as MeshStandardMaterial;
+      material.map?.dispose();
+      material.dispose();
+    }
+  };
+}
+
+/**
+ * Build one decal mesh on `target` from a world-space anchor and orientation.
+ * Returns null if the orientation basis degenerates. The caller parents it.
+ */
+function buildDecal(
+  target: Mesh,
+  pointWorld: Vector3,
+  normalWorld: Vector3,
+  upWorld: Vector3,
+  size: { width: number; height: number; depth: number },
+): Mesh | null {
+  // World basis: +Z along the surface normal (projection depth), +X the image's
+  // horizontal, +Y its vertical.
+  const z = normalWorld.clone().normalize();
+  const x = new Vector3().crossVectors(upWorld, z);
+  if (x.lengthSq() < 1e-6) return null;
+  x.normalize();
+
+  // Convert anchor + basis + size into the target's local frame so the decal
+  // can be built with the mesh's world matrix zeroed, then added as a child
+  // (its world matrix then re-applies the scene's centering/scaling).
+  const inverse = new Matrix4().copy(target.matrixWorld).invert();
+  const scale = new Vector3();
+  target.matrixWorld.decompose(new Vector3(), new Quaternion(), scale);
+  const unit = scale.x || 1;
+
+  const localPos = pointWorld.clone().applyMatrix4(inverse);
+  const xL = x.transformDirection(inverse).normalize();
+  const zL = z.transformDirection(inverse).normalize();
+  const yL = new Vector3().crossVectors(zL, xL).normalize();
+  const orientation = new Euler().setFromRotationMatrix(
+    new Matrix4().makeBasis(xL, yL, zL),
+  );
+  const localSize = new Vector3(
+    size.width / unit,
+    size.height / unit,
+    size.depth / unit,
+  );
+
+  const savedMatrixWorld = target.matrixWorld.clone();
+  target.matrixWorld.identity();
+  const geometry = new DecalGeometry(target, localPos, orientation, localSize);
+  target.matrixWorld.copy(savedMatrixWorld);
+
+  const decal = new Mesh(
+    geometry,
+    new MeshStandardMaterial({
+      transparent: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -10,
+      polygonOffsetUnits: -10,
+    }),
+  );
+  decal.castShadow = false;
+  decal.receiveShadow = true;
+  decal.renderOrder = 2;
+  return decal;
 }
