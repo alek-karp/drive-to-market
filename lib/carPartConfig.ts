@@ -27,13 +27,13 @@ export const carPartTextureConfig: Record<PaintablePart, PartTextureConfig> = {
   door_left: {
     width: 2048,
     height: 1024,
-    logoPosition: [200, 300],
+    logoPosition: [200, 680],
     decalPosition: [700, 100],
   },
   door_right: {
     width: 2048,
     height: 1024,
-    logoPosition: [200, 300],
+    logoPosition: [200, 680],
     decalPosition: [700, 100],
   },
   hood: {
