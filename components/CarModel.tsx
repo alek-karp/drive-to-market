@@ -336,6 +336,7 @@ function applyProjectedSideUvs(meshes: Mesh[]): void {
 
   const size = bounds.getSize(new Vector3());
   const min = bounds.min;
+  const midX = min.x + size.x / 2;
   const vertex = new Vector3();
   const spanZ = size.z || 1;
   const spanY = size.y || 1;
@@ -344,11 +345,19 @@ function applyProjectedSideUvs(meshes: Mesh[]): void {
     const position = mesh.geometry.getAttribute("position");
     if (!position) continue;
 
+    // The decal is planar-projected along world Z, so both sides sample U from
+    // the same z. Viewed from outside, the two sides face opposite directions,
+    // so that single mapping reads mirrored on the −X side. This body is a few
+    // large meshes that each span the full width, so we decide the flip
+    // per-vertex by which side of the centerline it sits on — flipping U on the
+    // −X half makes text run left-to-right on both the driver and passenger
+    // sides.
     const uv = new Float32Array(position.count * 2);
     for (let i = 0; i < position.count; i++) {
       vertex.fromBufferAttribute(position, i);
       mesh.localToWorld(vertex);
-      uv[i * 2] = (vertex.z - min.z) / spanZ;
+      const u = (vertex.z - min.z) / spanZ;
+      uv[i * 2] = vertex.x > midX ? 1 - u : u;
       uv[i * 2 + 1] = (vertex.y - min.y) / spanY;
     }
 
