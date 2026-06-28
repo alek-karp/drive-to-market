@@ -417,8 +417,16 @@ function buildAssetList(design: WrapDesign) {
   pushAsset(`${design.id}-decal`, "Decal graphic", design.graphics.decalUrl);
   pushAsset(
     `${design.id}-pattern`,
-    "Pattern graphic",
+    "Pattern texture",
     design.graphics.patternUrl,
+  );
+  pushAsset(
+    `${design.id}-pattern-svg`,
+    "Pattern SVG",
+    design.graphics.patternUrl.replace(
+      /pattern\.png(\?.*)?$/i,
+      "pattern.svg$1",
+    ),
   );
   pushAsset(`${design.id}-hood`, "Hood logo graphic", design.graphics.hoodUrl);
   pushAsset(

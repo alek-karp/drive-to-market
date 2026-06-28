@@ -6,6 +6,7 @@ import {
   type PartTextureConfig,
   paintableParts,
 } from "./carPartConfig";
+import { partPatternPhase } from "./patternSeed";
 import type { BrandProfile, PaintablePart, WrapDesign } from "./types";
 
 interface ComposeTexturesResult {
@@ -18,11 +19,9 @@ interface ComposeTexturesResult {
  * texture per paintable car part.
  *
  * This is the "product magic": instead of slapping one image on the car, we
- * composite a fixed-dimension texture for each part: full base coat, then the
- * generated wrap graphic, then a crisp company-name lockup rendered as text.
- * Per the demo
- * plan, text is drawn here with SVG (never relied on from an image model) so
- * the brand name always stays legible.
+ * composite a fixed-dimension texture for each part: the full-bleed livery
+ * pattern tile as the canvas, then any part-specific graphic (side ad decal,
+ * lockup text, etc.) on top.
  *
  * Outputs land in `public/textures/generated/<design.id>/<part>.png` so Stage 7
  * (Three.js) can apply them to the matching meshes by URL.
@@ -75,29 +74,35 @@ async function composePart(
   const cfg = carPartTextureConfig[part];
   const baseColor = brand?.colors[0] ?? design.baseColor;
 
-  if (AVATAR_PARTS.has(part) && design.graphics.avatarUrl) {
+  if (
+    AVATAR_PARTS.has(part) &&
+    design.graphics.avatarUrl &&
+    !isAiAdDesign(design)
+  ) {
     await composeAvatarPart(part, design, brand, dir, cfg, baseColor);
     return `/textures/generated/${design.id}/${part}.png`;
   }
 
-  const graphicUrl = SIDE_PARTS.has(part)
-    ? design.graphics.decalUrl
-    : design.graphics.patternUrl;
+  // Pattern tiles are full-bleed (base tone + marks). Use them as the canvas —
+  // overlaying the same hue on a solid base coat collapsed everything to one color.
+  const pattern = await loadPatternLayer(
+    design.graphics.patternUrl,
+    cfg,
+    design.id,
+    part,
+  );
+  const layers: sharp.OverlayOptions[] = [];
 
-  // Always start with a solid base coat so sparse or transparent graphics never
-  // reveal the model's default paint. Then apply the generated graphic over it.
-  const graphicSource = await readFile(publicPathToFs(graphicUrl));
-  const graphic = await sharp(graphicSource, { density: 200 })
-    .resize(cfg.width, cfg.height, { fit: "fill" })
-    .png()
-    .toBuffer();
-
-  // Build the full overlay stack in one composite call. sharp's `composite()`
-  // replaces — not appends — its layer list on each call, so the graphic and
-  // the lockup must go in together or the last call would drop the graphic.
-  const layers: sharp.OverlayOptions[] = [
-    { input: graphic, top: 0, left: 0, blend: "over" },
-  ];
+  if (SIDE_PARTS.has(part) && !isAiAdDesign(design)) {
+    const graphicSource = await readFile(
+      publicPathToFs(design.graphics.decalUrl),
+    );
+    const graphic = await sharp(graphicSource, { density: 200 })
+      .resize(cfg.width, cfg.height, { fit: "fill" })
+      .png()
+      .toBuffer();
+    layers.push({ input: graphic, top: 0, left: 0, blend: "over" });
+  }
   // The AI ad already bakes the company name into its graphic; stamping the
   // lockup on top of it would double the wordmark. Only procedural designs
   // (whose SVG graphics carry no text) get the lockup.
@@ -109,17 +114,8 @@ async function composePart(
     });
   }
 
-  const texture = sharp({
-    create: {
-      width: cfg.width,
-      height: cfg.height,
-      channels: 4,
-      background: baseColor,
-    },
-  }).composite(layers);
-
   const outPath = path.join(dir, `${part}.png`);
-  await texture.png().toFile(outPath);
+  await sharp(pattern).composite(layers).png().toFile(outPath);
   return `/textures/generated/${design.id}/${part}.png`;
 }
 
@@ -128,9 +124,16 @@ async function composeAvatarPart(
   design: WrapDesign,
   _brand: BrandProfile | undefined,
   dir: string,
-  cfg: import("./carPartConfig").PartTextureConfig,
-  baseColor: string,
+  cfg: PartTextureConfig,
+  _baseColor: string,
 ): Promise<void> {
+  const pattern = await loadPatternLayer(
+    design.graphics.patternUrl,
+    cfg,
+    design.id,
+    part,
+  );
+
   const avatarSource = await readFile(
     publicPathToFs(design.graphics.avatarUrl as string),
   );
@@ -144,14 +147,7 @@ async function composeAvatarPart(
   const ah = meta.height ?? avatarSize;
 
   const outPath = path.join(dir, `${part}.png`);
-  await sharp({
-    create: {
-      width: cfg.width,
-      height: cfg.height,
-      channels: 4,
-      background: baseColor,
-    },
-  })
+  await sharp(pattern)
     .composite([
       {
         input: avatar,
@@ -218,13 +214,72 @@ async function composeTrunkGraphic(
 }
 
 /** The AI ad design composites the company name into its own graphic. */
-function graphicHasName(design: WrapDesign): boolean {
+function isAiAdDesign(design: WrapDesign): boolean {
   return design.style === "AI Ad";
+}
+
+function graphicHasName(design: WrapDesign): boolean {
+  return isAiAdDesign(design);
 }
 
 /** Map a `/public`-relative URL back to its filesystem path. */
 function publicPathToFs(url: string): string {
   return path.join(process.cwd(), "public", url.replace(/^\//, ""));
+}
+
+async function loadPatternLayer(
+  patternUrl: string,
+  cfg: PartTextureConfig,
+  designId: string,
+  part: PaintablePart,
+): Promise<Buffer> {
+  const patternSource = await readFile(publicPathToFs(patternUrl));
+  const resized = await sharp(patternSource, { density: 200 })
+    .resize(cfg.width, cfg.height, { fit: "fill" })
+    .png()
+    .toBuffer();
+  const { x, y } = partPatternPhase(designId, part);
+  const phased = await phaseShiftPattern(resized, cfg.width, cfg.height, x, y);
+  return boostPatternContrast(phased);
+}
+
+/** Slide the tiled pattern so each body panel starts at a different phase. */
+async function phaseShiftPattern(
+  pattern: Buffer,
+  width: number,
+  height: number,
+  phaseX: number,
+  phaseY: number,
+): Promise<Buffer> {
+  const ox = Math.floor(phaseX % width);
+  const oy = Math.floor(phaseY % height);
+  if (ox === 0 && oy === 0) return pattern;
+
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([
+      { input: pattern, left: -ox, top: -oy },
+      { input: pattern, left: width - ox, top: -oy },
+      { input: pattern, left: -ox, top: height - oy },
+      { input: pattern, left: width - ox, top: height - oy },
+    ])
+    .png()
+    .toBuffer();
+}
+
+/** Lift greyscale motif brightness so marks survive PBR lighting in the viewer. */
+function boostPatternContrast(source: Buffer): Promise<Buffer> {
+  return sharp(source)
+    .linear(1.28, -12)
+    .modulate({ brightness: 1.12 })
+    .png()
+    .toBuffer();
 }
 
 // --- text lockup -------------------------------------------------------------

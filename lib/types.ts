@@ -1,5 +1,22 @@
 // Shared types for the vehicle-wrap demo pipeline.
 
+/** Decorative overlay style for the livery background (Stage 3). */
+export type PatternType =
+  | "ai"
+  | "none"
+  | "shards"
+  | "speedlines"
+  | "fracture";
+
+/** Stage 3 output: AI-generated (or fallback) livery pattern. */
+export interface Pattern {
+  type: PatternType;
+  /** Public URL to `pattern.png` — rasterized from the SVG for WebGL. */
+  textureUrl: string;
+  /** Public URL to the source `pattern.svg`. */
+  svgUrl: string;
+}
+
 /** Stage 2 output: car paint material properties derived from a BrandProfile. */
 export interface BaseCoat {
   /** Hex color for the car body paint. */
@@ -44,7 +61,7 @@ export interface AdConcept {
 export interface WrapGraphics {
   /** Wide side decal, applied across the front door parts. */
   decalUrl: string;
-  /** Square hood/roof pattern. */
+  /** Full-coverage subtle livery pattern applied under decals. */
   patternUrl: string;
   /** Dedicated transparent hood badge/logo graphic generated from brand data. */
   hoodUrl?: string;

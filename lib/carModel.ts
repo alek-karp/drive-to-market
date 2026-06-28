@@ -112,3 +112,36 @@ export function categoryForMaterial(
 
   return "other";
 }
+
+/**
+ * Tesla interior cabin uses a smaller `black_base` mesh (~7 m³) than the
+ * exterior panels (~11–14 m³). Only exterior panels receive wrap textures.
+ */
+const EXTERIOR_PANEL_VOLUME = 10;
+
+/**
+ * Meshes that receive wrap paint / livery patterns.
+ */
+export function isWrappableMesh(
+  materialName: string,
+  meshVolume: number,
+): boolean {
+  const name = materialName.toLowerCase();
+  if (name === "paint" || name === "material_2125765635") return true;
+  if (name === "black_base") return meshVolume >= EXTERIOR_PANEL_VOLUME;
+  return false;
+}
+
+/**
+ * Opaque reflective windshield shell — hide while a wrap is active so the paint
+ * layer underneath stays visible. Interior `black_base` meshes are never hidden.
+ */
+export function isReflectiveOverlayShell(
+  materialName: string,
+  meshVolume: number,
+): boolean {
+  return (
+    materialName.toLowerCase() === "black_reflection" &&
+    meshVolume >= EXTERIOR_PANEL_VOLUME
+  );
+}

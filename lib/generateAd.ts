@@ -7,6 +7,7 @@ import {
   buildAdConcepts,
   buildAvatarPrompt,
 } from "./generateAdPrompt";
+import { derivePattern } from "./pattern";
 import type { AdConcept, BrandProfile, WrapDesign } from "./types";
 
 /**
@@ -55,11 +56,12 @@ export async function generateAdDesign(
   if (!winner) throw new Error("Grok returned no image data.");
 
   const id = `${slug(brand.name)}-ai-ad`;
-  const [adUrl, baseCoat, trunkCta, avatarUrl] = await Promise.all([
+  const [adUrl, baseCoat, trunkCta, avatarUrl, pattern] = await Promise.all([
     saveAd(id, winner, brand),
     Promise.resolve(deriveBaseCoat(brand)),
     requestTrunkCta(apiKey, brand, winner.concept),
     generateAvatar(apiKey, id, brand),
+    derivePattern(brand, id, apiKey),
   ]);
 
   return {
@@ -69,7 +71,12 @@ export async function generateAdDesign(
     baseColor: baseCoat.color,
     metalness: baseCoat.metalness,
     roughness: baseCoat.roughness,
-    graphics: { decalUrl: adUrl, patternUrl: adUrl, trunkCta, avatarUrl },
+    graphics: {
+      decalUrl: adUrl,
+      patternUrl: pattern.textureUrl,
+      trunkCta,
+      avatarUrl,
+    },
     textures: {},
   };
 }

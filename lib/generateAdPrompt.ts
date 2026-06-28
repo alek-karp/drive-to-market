@@ -1,3 +1,4 @@
+import { motifLabel, type PatternVariant } from "./patternSeed";
 import type { AdConcept, BrandProfile } from "./types";
 
 export function buildAdConcepts(brand: BrandProfile, count = 4): AdConcept[] {
@@ -41,6 +42,30 @@ export function buildAdBackgroundPrompt(
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+export function buildPatternSvgPrompt(
+  brand: BrandProfile,
+  variant: PatternVariant,
+): string {
+  const primary = brand.colors[0] ?? "#111111";
+
+  return [
+    `Design a seamless vehicle-livery SVG texture for ${brand.category} brand "${brand.name}".`,
+    `Audience: ${brand.audience}. Tone: ${brand.tone}.`,
+    `The SVG wraps a full car body — it must tile cleanly and read as one continuous surface.`,
+    `Canvas: exactly width="2048" height="2048" viewBox="0 0 2048 2048".`,
+    `Fill the entire canvas edge-to-edge with ${primary} — that is the only brand color on the canvas.`,
+    "Style reference: aggressive performance car wrap like a Nissan GT-R livery — large angular shard panels, tapered spear-like fragments, and clusters of parallel speed lines that follow motion.",
+    "Graphic marks: white/light grey on light bases; on dark bases prefer bright accent tones at high opacity. Never hue-shift the base coat.",
+    "Use high contrast but keep the layout clean: 4–6 large elements per tile, generous negative space, one dominant flow direction.",
+    `Variation seed: ${variant.seed}. Motif family: ${motifLabel(variant.type)}.`,
+    "Use large, spaced elements (roughly 200–420px) — no dot grids, no carbon weave, no crosshatch, no repeating circles.",
+    "Shards should be simple tapered triangles with sharp points. Speed lines should run in parallel groups of 4, gently curved.",
+    "No text, letters, logos, icons, photos, checkerboards, or full grey backgrounds.",
+    "No script tags, foreignObject, external hrefs, or embedded images.",
+    "Return ONLY the raw SVG markup starting with <svg — no markdown fences, no explanation.",
+  ].join(" ");
 }
 
 export function buildAvatarPrompt(brand: BrandProfile): string {

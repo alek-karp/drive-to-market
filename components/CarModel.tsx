@@ -13,6 +13,7 @@ import {
   MeshStandardMaterial,
   Quaternion,
   Raycaster,
+  RepeatWrapping,
   SRGBColorSpace,
   type Texture,
   TextureLoader,
@@ -22,8 +23,12 @@ import { DecalGeometry } from "three/examples/jsm/geometries/DecalGeometry.js";
 import {
   type CarPartCategory,
   categoryForMaterial,
+  isReflectiveOverlayShell,
+  isWrappableMesh,
   MODEL_PATH,
 } from "@/lib/carModel";
+import { isDebugPatternUrl } from "@/lib/debugPattern";
+import { ensureWrapUvs } from "@/lib/meshUvs";
 import type { PaintablePart, WrapDesign } from "@/lib/types";
 
 interface CarModelProps {
@@ -51,6 +56,9 @@ const SIDE_PARTS = new Set<PaintablePart>([
 
 /** Raw Stage 5 graphic to use when a part has no composed texture yet. */
 function fallbackGraphic(part: PaintablePart, design: WrapDesign): string {
+  if (isAiAdDesign(design)) {
+    return design.graphics.patternUrl;
+  }
   return SIDE_PARTS.has(part)
     ? design.graphics.decalUrl
     : design.graphics.patternUrl;
@@ -60,14 +68,9 @@ function isAiAdDesign(design: WrapDesign): boolean {
   return design.style === "AI Ad";
 }
 
-function isPaintMaterial(material: MeshStandardMaterial): boolean {
-  return (
-    categoryForMaterial(material.name) === "body" && !isCoatMaterial(material)
-  );
-}
-
-function isCoatMaterial(material: MeshStandardMaterial): boolean {
-  return material.name.toLowerCase() === "coat";
+function meshVolume(mesh: Mesh): number {
+  const size = new Box3().setFromObject(mesh).getSize(new Vector3());
+  return size.x * size.y * size.z;
 }
 
 /**
@@ -168,15 +171,55 @@ export function CarModel({
   // The model isn't separated into named parts, so this spatial pass is how
   // Stage 7 targets a different composed texture per surface.
   const body = useMemo(() => {
-    const bodyMeshes: Mesh[] = [];
-    for (const [mesh, category] of meshCategory) {
-      if (category === "body") bodyMeshes.push(mesh);
+    const wrapCandidates: Mesh[] = [];
+    const shellMeshes: Mesh[] = [];
+
+    for (const [mesh] of meshCategory) {
+      const volume = meshVolume(mesh);
+      const materials = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+
+      if (
+        materials.some(
+          (material) =>
+            material instanceof MeshStandardMaterial &&
+            isReflectiveOverlayShell(material.name, volume),
+        )
+      ) {
+        shellMeshes.push(mesh);
+        continue;
+      }
+
+      if (
+        materials.some(
+          (material) =>
+            material instanceof MeshStandardMaterial &&
+            isWrappableMesh(material.name, volume),
+        )
+      ) {
+        wrapCandidates.push(mesh);
+      }
     }
-    const partOf = assignBodyParts(bodyMeshes);
+
+    const wrapMeshes: Mesh[] = [];
+    const originalUvs = new Map<Mesh, Float32Array | null>();
+    for (const mesh of wrapCandidates) {
+      const uv = mesh.geometry.getAttribute("uv");
+      originalUvs.set(
+        mesh,
+        uv ? new Float32Array(uv.array as ArrayLike<number>) : null,
+      );
+      ensureWrapUvs(mesh);
+      if (mesh.geometry.getAttribute("uv")) {
+        wrapMeshes.push(mesh);
+      }
+    }
+
+    const partOf = assignBodyParts(wrapMeshes);
 
     const byPart = new Map<PaintablePart, MeshStandardMaterial[]>();
     const paintMeshes: Mesh[] = [];
-    const originalUvs = new Map<Mesh, Float32Array | null>();
     const stock = new Map<
       MeshStandardMaterial,
       {
@@ -186,28 +229,18 @@ export function CarModel({
         roughness: number;
       }
     >();
-    for (const mesh of bodyMeshes) {
+    for (const mesh of wrapMeshes) {
       const part = partOf.get(mesh);
       if (!part) continue;
       const materials = Array.isArray(mesh.material)
         ? mesh.material
         : [mesh.material];
-      if (
-        materials.some(
-          (material) =>
-            material instanceof MeshStandardMaterial &&
-            isPaintMaterial(material),
-        )
-      ) {
-        paintMeshes.push(mesh);
-        const uv = mesh.geometry.getAttribute("uv");
-        originalUvs.set(
-          mesh,
-          uv ? new Float32Array(uv.array as ArrayLike<number>) : null,
-        );
-      }
+
+      paintMeshes.push(mesh);
+
       for (const material of materials) {
         if (!(material instanceof MeshStandardMaterial)) continue;
+        if (!isWrappableMesh(material.name, meshVolume(mesh))) continue;
         if (!stock.has(material)) {
           stock.set(material, {
             color: material.color.clone(),
@@ -221,7 +254,7 @@ export function CarModel({
         byPart.set(part, list);
       }
     }
-    return { byPart, originalUvs, paintMeshes, stock };
+    return { byPart, originalUvs, paintMeshes, shellMeshes, stock };
   }, [meshCategory]);
 
   // Report which categories the model actually contains.
@@ -236,10 +269,11 @@ export function CarModel({
   // it loads. Designs whose textures haven't been composed fall back to the raw
   // Stage 5 decal/pattern. Clearing the design restores the model's stock paint.
   useEffect(() => {
-    const { byPart, originalUvs, paintMeshes, stock } = body;
+    const { byPart, originalUvs, paintMeshes, shellMeshes, stock } = body;
 
     if (!design) {
       restoreOriginalUvs(originalUvs);
+      for (const mesh of shellMeshes) mesh.visible = true;
       for (const [material, original] of stock) {
         material.color.copy(original.color);
         material.map = original.map;
@@ -250,33 +284,80 @@ export function CarModel({
       return;
     }
 
-    // Paint the whole body in the brand base coat. The ad is no longer baked
-    // into the body texture — it is projected on as decals (below), so the body
-    // only needs the right color/finish underneath each placement.
-    restoreOriginalUvs(originalUvs);
+    // Keep box-projected UVs for the active wrap. restoreOriginalUvs() puts the
+    // GLB's collapsed (0,0) UVs back and every texel samples one pixel → flat black.
+    for (const mesh of paintMeshes) {
+      ensureWrapUvs(mesh);
+    }
+    for (const mesh of shellMeshes) mesh.visible = false;
+
     const base = new Color(design.baseColor);
     for (const [material] of stock) {
       material.map = null;
-      if (isCoatMaterial(material)) {
-        material.color.set("#ffffff");
-      } else if (isPaintMaterial(material)) {
-        material.color.copy(base);
-        material.metalness = design.metalness;
-        material.roughness = design.roughness;
-      }
+      material.color.copy(base);
+      material.metalness = Math.min(design.metalness, 0.35);
+      material.roughness = Math.max(design.roughness, 0.48);
       material.needsUpdate = true;
     }
 
-    // The AI ad goes on as projected decals over specific panels so the artwork
-    // keeps its aspect ratio, conforms to body curvature, and never spills onto
-    // glass or wheels.
     if (isAiAdDesign(design)) {
-      return applyAdDecals(paintMeshes, design);
+      let cancelled = false;
+      const loader = new TextureLoader();
+      const loaded: Texture[] = [];
+      const debugPattern = isDebugPatternUrl(design.graphics.patternUrl);
+
+      if (debugPattern) {
+        const wrapMaterials = [...new Set([...byPart.values()].flat())];
+        const texture = loader.load(design.graphics.patternUrl, (t) => {
+          if (cancelled) {
+            t.dispose();
+            return;
+          }
+          t.colorSpace = SRGBColorSpace;
+          t.flipY = false;
+          t.wrapS = RepeatWrapping;
+          t.wrapT = RepeatWrapping;
+          t.repeat.set(8, 8);
+          for (const material of wrapMaterials) {
+            material.map = t;
+            material.color.set("#ffffff");
+            material.needsUpdate = true;
+          }
+        });
+        loaded.push(texture);
+      } else {
+        for (const [part, materials] of byPart) {
+          const url = design.textures?.[part] ?? fallbackGraphic(part, design);
+          const texture = loader.load(url, (t) => {
+            if (cancelled) {
+              t.dispose();
+              return;
+            }
+            t.colorSpace = SRGBColorSpace;
+            t.flipY = false;
+            t.wrapS = RepeatWrapping;
+            t.wrapT = RepeatWrapping;
+            t.repeat.set(3, 3);
+            for (const material of materials) {
+              material.map = t;
+              material.color.set("#ffffff");
+              material.needsUpdate = true;
+            }
+          });
+          loaded.push(texture);
+        }
+      }
+
+      const cleanupDecals = applyAdDecals(paintMeshes, design);
+
+      return () => {
+        cancelled = true;
+        for (const mesh of shellMeshes) mesh.visible = true;
+        cleanupDecals();
+        for (const t of loaded) t.dispose();
+      };
     }
 
-    // Legacy per-part wrap textures (procedural concepts). Each logical part
-    // gets its own composed texture as the material map, falling back to the raw
-    // Stage 5 graphic when a part hasn't been composed yet.
     let cancelled = false;
     const loader = new TextureLoader();
     const loaded: Texture[] = [];
@@ -291,7 +372,6 @@ export function CarModel({
         t.colorSpace = SRGBColorSpace;
         t.flipY = false;
         for (const material of materials) {
-          if (!isPaintMaterial(material)) continue;
           material.map = t;
           material.color.set("#ffffff");
           material.needsUpdate = true;
@@ -302,6 +382,7 @@ export function CarModel({
 
     return () => {
       cancelled = true;
+      for (const mesh of shellMeshes) mesh.visible = true;
       for (const t of loaded) t.dispose();
     };
   }, [design, body]);

@@ -29,17 +29,11 @@ Set the body material color directly — no texture needed. This is a material p
 ## Stage 3 — Pattern
 
 Input: `BrandProfile`  
-Output: `PatternType` + generated pattern texture
+Output: `PatternType` + generated `pattern.svg`
 
-Choose a decorative overlay for the body surface:
+Grok writes a seamless SVG livery texture sized 2048×2048. It is saved as `pattern.svg`, rasterized to `pattern.png` for WebGL, and tiles across the whole car body.
 
-- `none`
-- `stripes`
-- `gradient`
-- `abstract`
-- `branded`
-
-Pattern sits on top of the base color. It sets the vibe, not the message.
+Pattern sits on top of the base color as a tonal overlay — it sets the vibe, not the message.
 
 ---
 
