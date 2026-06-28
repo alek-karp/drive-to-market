@@ -9,13 +9,25 @@ This file tracks the current system shape and architecture decisions. Keep it co
 - Browser-only 3D rendering is isolated behind a dynamic client import of `components/CarViewer.tsx`.
 - Shared domain types live in `lib/types.ts`; route handlers validate request bodies before calling library modules.
 
+## Design Model
+
+The pipeline follows `DESIGN_MODEL.md`. Stages 1–2 are implemented; stages 3–4 are planned.
+
+| Stage | Input | Output | Status |
+|-------|-------|--------|--------|
+| 1 — Brand Extraction | website URL | `BrandProfile` (colors, logo, tone, category) | ✅ done |
+| 2 — Base Color | `BrandProfile` | `BaseCoat` (`color` + `metalness` + `roughness`) | ✅ done |
+| 3 — Pattern | `BrandProfile` | `PatternType` + generated pattern texture | planned |
+| 4 — Ad Placements | `BrandProfile` | one image per `ad_anchor_*` slot | planned |
+
 ## Request Flow
 
-1. `POST /api/process-url` normalizes the submitted URL and calls `lib/scrapeWebsite.ts` to produce a `BrandProfile`.
-2. `POST /api/generate-design` normalizes the brand profile and calls `lib/generateWrapGraphics.ts` for deterministic wrap concepts.
-3. `POST /api/generate-ad` normalizes the brand profile and calls `lib/generateAd.ts` for the Grok-generated ad design. This path is non-fatal in the UI.
-4. `POST /api/compose-textures` validates a `WrapDesign` and calls `lib/composeTextures.ts` to generate per-part PNG textures.
-5. The client stores the resulting brand, designs, selected design, and status locally in `app/page.tsx`.
+1. `POST /api/process-url` — Stage 1: normalizes the submitted URL and calls `lib/scrapeWebsite.ts` to produce a `BrandProfile`.
+2. `POST /api/base-color` — Stage 2: accepts a `BrandProfile` and calls `lib/baseColor.ts` to produce a `BaseCoat` (color + metalness + roughness). Also called internally by `/api/generate-design` and `/api/generate-ad` to populate `WrapDesign.metalness`/`roughness`.
+3. `POST /api/generate-design` normalizes the brand profile and calls `lib/generateWrapGraphics.ts` for deterministic wrap concepts.
+4. `POST /api/generate-ad` normalizes the brand profile and calls `lib/generateAd.ts` for the Grok-generated ad design. This path is non-fatal in the UI.
+5. `POST /api/compose-textures` validates a `WrapDesign` and calls `lib/composeTextures.ts` to generate per-part PNG textures.
+6. The client stores the resulting brand, designs, selected design, and status locally in `app/page.tsx`.
 
 ## Boundaries
 
@@ -24,6 +36,17 @@ This file tracks the current system shape and architecture decisions. Keep it co
 - `components/*`: interactive UI, 3D viewer, design picker, and visual presentation.
 - `components/ui/*`: reusable UI primitives; keep application-specific behavior out of this folder.
 - `public/*`: static assets and generated/readable files that must be served by the app.
+
+## Models
+
+Two Tesla GLBs live in `public/models/`:
+
+| File | Mode | How ads are applied |
+|------|------|---------------------|
+| `tesla.glb` | Wrap mode | Textures UV-mapped onto body meshes via spatial part classification |
+| `teslanew.glb` | Ad boards | Same body wrap **plus** textures applied to named `ad_anchor_*` plane meshes pre-positioned on each car surface (hood, left/right front doors, left/right back doors, trunk) |
+
+The model registry lives in `lib/carModel.ts` (`CAR_MODELS`, `CarModelId`). The viewer shows a mode switcher; the selected model path is passed to `CarModel` as a prop. Both models share the same material names so the category/paint system works for both.
 
 ## External Dependencies
 

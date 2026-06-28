@@ -174,7 +174,12 @@ export function CarModel({
     const originalUvs = new Map<Mesh, Float32Array | null>();
     const stock = new Map<
       MeshStandardMaterial,
-      { color: Color; map: Texture | null }
+      {
+        color: Color;
+        map: Texture | null;
+        metalness: number;
+        roughness: number;
+      }
     >();
     for (const mesh of bodyMeshes) {
       const part = partOf.get(mesh);
@@ -202,6 +207,8 @@ export function CarModel({
           stock.set(material, {
             color: material.color.clone(),
             map: material.map,
+            metalness: material.metalness,
+            roughness: material.roughness,
           });
         }
         const list = byPart.get(part) ?? [];
@@ -231,6 +238,8 @@ export function CarModel({
       for (const [material, original] of stock) {
         material.color.copy(original.color);
         material.map = original.map;
+        material.metalness = original.metalness;
+        material.roughness = original.roughness;
         material.needsUpdate = true;
       }
       return;
@@ -243,12 +252,14 @@ export function CarModel({
       applyProjectedSideUvs(paintMeshes);
     }
     const base = new Color(design.baseColor);
-    for (const material of stock.keys()) {
+    for (const [material] of stock) {
       material.map = null;
       if (isCoatMaterial(material)) {
         material.color.set("#ffffff");
-      } else {
+      } else if (isPaintMaterial(material)) {
         material.color.copy(base);
+        material.metalness = design.metalness;
+        material.roughness = design.roughness;
       }
       material.needsUpdate = true;
     }

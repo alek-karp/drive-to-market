@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { deriveBaseCoat } from "./baseColor";
 import { type WrapStyle, wrapStyles } from "./generateWrapPrompt";
 import type { BrandProfile, WrapDesign } from "./types";
 
@@ -24,6 +25,8 @@ export async function generateWrapDesigns(
 ): Promise<WrapDesign[]> {
   const brandSlug = slug(brand.name);
 
+  const baseCoat = deriveBaseCoat(brand);
+
   return Promise.all(
     wrapStyles.map(async (style): Promise<WrapDesign> => {
       const palette = resolvePalette(brand.colors);
@@ -40,7 +43,9 @@ export async function generateWrapDesigns(
         id,
         style,
         description: STYLE_DESCRIPTIONS[style],
-        baseColor: palette.base,
+        baseColor: baseCoat.color,
+        metalness: baseCoat.metalness,
+        roughness: baseCoat.roughness,
         graphics: { decalUrl, patternUrl },
         textures: {},
       };

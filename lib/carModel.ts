@@ -57,7 +57,7 @@ const MATERIAL_CATEGORY: Record<string, CarPartCategory> = {
 
   // Tesla asset
   material_2125765635: "body",
-  material_2125767099: "body",
+  material_2125767099: "trim", // wheel-arch / lower rocker — at rim height, must not be painted
   rubber_rough: "wheels",
   rubber_rough222: "wheels",
   black222: "wheels",

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { deriveBaseCoat } from "./baseColor";
 import { buildAdBackgroundPrompt, buildAdConcepts } from "./generateAdPrompt";
 import type { AdConcept, BrandProfile, WrapDesign } from "./types";
 
@@ -50,13 +51,18 @@ export async function generateAdDesign(
   if (!winner) throw new Error("Grok returned no image data.");
 
   const id = `${slug(brand.name)}-ai-ad`;
-  const adUrl = await saveAd(id, winner, brand);
+  const [adUrl, baseCoat] = await Promise.all([
+    saveAd(id, winner, brand),
+    Promise.resolve(deriveBaseCoat(brand)),
+  ]);
 
   return {
     id,
     style: "AI Ad",
     description: `${winner.concept.hook} · ${winner.concept.cta}`,
-    baseColor: brand.colors[0] ?? "#111111",
+    baseColor: baseCoat.color,
+    metalness: baseCoat.metalness,
+    roughness: baseCoat.roughness,
     graphics: { decalUrl: adUrl, patternUrl: adUrl },
     textures: {},
   };

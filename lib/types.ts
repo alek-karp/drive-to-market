@@ -1,5 +1,15 @@
 // Shared types for the vehicle-wrap demo pipeline.
 
+/** Stage 2 output: car paint material properties derived from a BrandProfile. */
+export interface BaseCoat {
+  /** Hex color for the car body paint. */
+  color: string;
+  /** PBR metalness 0–1. 0 = matte/plastic, 1 = mirror-metal. */
+  metalness: number;
+  /** PBR roughness 0–1. 0 = mirror, 1 = fully diffuse. */
+  roughness: number;
+}
+
 /** Brand data extracted from a website (Stage 4). */
 export interface BrandProfile {
   name: string;
@@ -47,10 +57,29 @@ export interface WrapDesign {
   description: string;
   /** Dominant color used for the design swatch / base coat. */
   baseColor: string;
+  /** PBR metalness applied to paint materials when this design is active. */
+  metalness: number;
+  /** PBR roughness applied to paint materials when this design is active. */
+  roughness: number;
   /** Generated wrap graphics (Stage 5): the creative style, pre-composition. */
   graphics: WrapGraphics;
   /** Per-part texture URLs once composed (Stage 6). Empty until composed. */
   textures: Partial<Record<PaintablePart, string>>;
+}
+
+/** Stage 3: decorative overlay applied on top of the base color. */
+export type PatternType =
+  | "none"
+  | "stripes"
+  | "gradient"
+  | "abstract"
+  | "branded";
+
+/** Stage 3 output: chosen pattern + the generated texture URL (empty string when type is "none"). */
+export interface Pattern {
+  type: PatternType;
+  /** Public URL to the generated SVG texture, or "" when type is "none". */
+  textureUrl: string;
 }
 
 /** Mesh/material names of the paintable parts on the prepared car model. */
