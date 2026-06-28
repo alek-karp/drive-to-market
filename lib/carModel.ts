@@ -1,17 +1,13 @@
 // Stage 2: model inspection + part classification.
 //
-// The prepared model (public/models/datsun.glb) is NOT separated into named
-// body parts (door_left, hood, roof, …) the way the original plan assumed.
-// It is a typical asset grouped *by material*: ~70 meshes named
-// "Plane.0XX_<material>" sharing 14 materials (paint, coat, chrome, glass,
-// tire, alloy, black_matte, headlights, stickers, …).
+// The prepared models are NOT separated into named body parts (door_left, hood,
+// roof, ...) the way the original plan assumed. They are typical assets grouped
+// mostly by material, so we classify mesh materials into semantic categories.
 //
-// So we make every surface individually targetable by classifying each mesh's
-// material into a semantic category. The paintable car body is the `paint`
-// and `coat` materials; everything else (wheels, glass, chrome, lights, trim)
-// is left untouched by the wrap.
+// The wrap renderer then paints only the `body` category; everything else
+// (wheels, glass, chrome, lights, trim) is left untouched.
 
-export const MODEL_PATH = "/models/datsun.glb";
+export const MODEL_PATH = "/models/tesla.glb";
 
 /** Semantic groups every mesh in the model is sorted into. */
 export type CarPartCategory =
@@ -44,6 +40,7 @@ export const CATEGORY_LABELS: Record<CarPartCategory, string> = {
  * the GLB (see the meshes' `_<material>` suffixes).
  */
 const MATERIAL_CATEGORY: Record<string, CarPartCategory> = {
+  // Datsun asset
   paint: "body",
   coat: "body",
   tire: "wheels",
@@ -57,6 +54,29 @@ const MATERIAL_CATEGORY: Record<string, CarPartCategory> = {
   black_matte: "trim",
   license: "accents",
   stickers: "accents",
+
+  // Tesla asset
+  material_2125765635: "body",
+  material_2125767099: "body",
+  rubber_rough: "wheels",
+  rubber_rough222: "wheels",
+  black222: "wheels",
+  glass_base: "glass",
+  glass_headlight222: "glass",
+  glass_roof_panorama: "glass",
+  front_white_light: "lights",
+  back_red_light: "lights",
+  red_plastic: "lights",
+  iron_clean_distorted: "chrome",
+  mirror: "trim",
+  black: "trim",
+  black_base: "trim",
+  black_reflection: "trim",
+  "black.001": "trim",
+  "black.002": "trim",
+  material_111: "trim",
+  "04_-_default": "trim",
+  material: "accents",
 };
 
 /**

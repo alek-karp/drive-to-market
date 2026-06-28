@@ -56,7 +56,9 @@ function isAiAdDesign(design: WrapDesign): boolean {
 }
 
 function isPaintMaterial(material: MeshStandardMaterial): boolean {
-  return material.name.toLowerCase() === "paint";
+  return (
+    categoryForMaterial(material.name) === "body" && !isCoatMaterial(material)
+  );
 }
 
 function isCoatMaterial(material: MeshStandardMaterial): boolean {
