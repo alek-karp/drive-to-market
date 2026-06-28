@@ -9,6 +9,7 @@
  */
 
 import type * as assets from "../assets.js";
+import type * as brand from "../brand.js";
 import type * as constants from "../constants.js";
 import type * as validators from "../validators.js";
 
@@ -20,6 +21,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   assets: typeof assets;
+  brand: typeof brand;
   constants: typeof constants;
   validators: typeof validators;
 }>;

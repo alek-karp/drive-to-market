@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { scrapeWebsite } from "@/lib/scrapeWebsite";
+import { extractBrandFromUrl } from "@/lib/extractBrand";
 
-/** Stage 4: URL -> brand profile (live extraction with graceful fallback). */
+/** Stage 1: URL -> brand profile (Exa via Convex, HTML scrape fallback). */
 export const POST = async (request: Request) => {
   let url: unknown;
   try {
@@ -23,7 +23,7 @@ export const POST = async (request: Request) => {
   }
 
   try {
-    const brand = await scrapeWebsite(normalizedUrl);
+    const brand = await extractBrandFromUrl(normalizedUrl);
     return NextResponse.json({ brand, normalizedUrl });
   } catch (error) {
     const message =

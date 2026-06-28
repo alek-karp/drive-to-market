@@ -23,7 +23,7 @@ The pipeline follows `DESIGN_MODEL.md`. Stages 1–3 are implemented; stage 4 is
 
 ## Request Flow
 
-1. `POST /api/process-url` — Stage 1: normalizes the submitted URL and calls `lib/scrapeWebsite.ts` to produce a `BrandProfile`.
+1. `POST /api/process-url` — Stage 1: normalizes the submitted URL and calls Exa via Convex (`brand:extractFromUrl`) to produce a `BrandProfile`, with `lib/scrapeWebsite.ts` as fallback when Exa/Convex is unavailable.
 2. `POST /api/base-color` — Stage 2: accepts a `BrandProfile` and calls `lib/baseColor.ts` to produce a `BaseCoat` (color + metalness + roughness). Also called internally by `/api/generate-ad` to populate `WrapDesign.metalness`/`roughness`.
 3. `POST /api/pattern` — Stage 3: accepts a `BrandProfile` and optional `designId`, calls `lib/pattern.ts` to build a seeded procedural SVG livery pattern (motif type, spacing, and phase from `lib/patternSeed.ts`). Grok SVG generation is opt-in via `XAI_PATTERN=true`. Compose shifts phase per body panel.
 4. `POST /api/generate-ad` normalizes the brand profile and calls `lib/generateAd.ts` for the Grok-generated ad design, including the Stage 3 pattern, one short LLM-generated trunk CTA stored on `graphics.trunkCta`, and optional brand avatar. This path is non-fatal in the UI.
@@ -37,7 +37,7 @@ The pipeline follows `DESIGN_MODEL.md`. Stages 1–3 are implemented; stage 4 is
 - `components/*`: interactive UI, 3D viewer, design picker, and visual presentation.
 - `components/ui/*`: reusable UI primitives; keep application-specific behavior out of this folder.
 - `public/*`: static assets and generated/readable files that must be served by the app.
-- `convex/*`: database schema, asset upload mutations/queries (`generateUploadUrl`, `createAsset`, `listLogos`, `listByOrgAndType`). Default org id: `drive-to-market` (`convex/constants.ts`).
+- `convex/*`: database schema, asset upload mutations/queries, and `brand:extractFromUrl` (Exa-backed brand extraction). Default org id: `drive-to-market` (`convex/constants.ts`). Requires `EXA_API_KEY` in Convex env.
 
 ## Convex Assets
 
