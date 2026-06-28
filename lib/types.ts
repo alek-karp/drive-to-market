@@ -42,7 +42,7 @@ export interface AdConcept {
 
 /** Raw wrap graphics generated for a concept (Stage 5). */
 export interface WrapGraphics {
-  /** Wide side decal, applied across the door/panel parts. */
+  /** Wide side decal, applied across the front door parts. */
   decalUrl: string;
   /** Square hood/roof pattern. */
   patternUrl: string;
@@ -52,6 +52,8 @@ export interface WrapGraphics {
   trunkUrl?: string;
   /** Short LLM-generated trunk CTA copy rendered into the trunk graphic. */
   trunkCta?: string;
+  /** AI-generated brand mascot/avatar placed on the rear door panels. */
+  avatarUrl?: string;
 }
 
 /** A generated wrap concept the user can pick (Stage 5/8). */

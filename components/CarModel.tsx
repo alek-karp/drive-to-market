@@ -373,7 +373,7 @@ interface DecalSlot {
   along: number;
   side: -1 | 0 | 1;
   surface: "side" | "top" | "rear";
-  graphic: "ad" | "hood" | "trunk";
+  graphic: "ad" | "hood" | "trunk" | "avatar";
   aspect?: number;
   /** Side/rear slots: normalized height up the body (0 floor → 1 roof). */
   heightFrac?: number;
@@ -402,17 +402,19 @@ const AD_DECAL_SLOTS: DecalSlot[] = [
     along: 0.32,
     side: -1,
     surface: "side",
-    graphic: "ad",
+    graphic: "avatar",
+    aspect: 1,
     heightFrac: 0.46,
-    widthFrac: 0.3,
+    widthFrac: 0.24,
   },
   {
     along: 0.32,
     side: 1,
     surface: "side",
-    graphic: "ad",
+    graphic: "avatar",
+    aspect: 1,
     heightFrac: 0.46,
-    widthFrac: 0.3,
+    widthFrac: 0.24,
   },
   {
     along: 0.8,
@@ -539,7 +541,9 @@ function applyAdDecals(meshes: Mesh[], design: WrapDesign): () => void {
         ? (design.graphics.hoodUrl ?? design.graphics.decalUrl)
         : slot.graphic === "trunk"
           ? (design.graphics.trunkUrl ?? design.graphics.decalUrl)
-          : design.graphics.decalUrl;
+          : slot.graphic === "avatar"
+            ? (design.graphics.avatarUrl ?? design.graphics.decalUrl)
+            : design.graphics.decalUrl;
     const textureDecals = decalsByTexture.get(slotTextureUrl) ?? [];
     textureDecals.push(decal);
     decalsByTexture.set(slotTextureUrl, textureDecals);

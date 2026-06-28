@@ -67,6 +67,7 @@ const normalizeGraphics = (
   const hoodUrl = candidate.hoodUrl?.trim();
   const trunkUrl = candidate.trunkUrl?.trim();
   const trunkCta = candidate.trunkCta?.trim();
+  const avatarUrl = candidate.avatarUrl?.trim();
 
   if (!decalUrl || !patternUrl) return null;
 
@@ -76,5 +77,6 @@ const normalizeGraphics = (
     ...(hoodUrl ? { hoodUrl } : {}),
     ...(trunkUrl ? { trunkUrl } : {}),
     ...(trunkCta ? { trunkCta } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
   };
 };

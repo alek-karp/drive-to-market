@@ -43,6 +43,26 @@ export function buildAdBackgroundPrompt(
     .join(" ");
 }
 
+export function buildAvatarPrompt(brand: BrandProfile): string {
+  const primaryColor = brand.colors[0] ?? "the primary brand color";
+  const accentColor = brand.colors[1] ?? "a complementary accent color";
+
+  return [
+    `Create a bold, friendly mascot or character avatar for the brand "${brand.name}" (${brand.category}).`,
+    `Audience: ${brand.audience}. Tone: ${brand.tone}.`,
+    `The mascot should visually embody the brand's personality and be instantly recognizable.`,
+    `Design it as a single centered character or creature illustration — clean, vector-style, with strong outlines.`,
+    `Use ${primaryColor} as the dominant color and ${accentColor} as an accent.`,
+    `The character should fill the center of the image with generous white padding around it.`,
+    "Make it charming, simple, and memorable — the kind of mascot you'd put on a vehicle decal.",
+    "No text, no logos, no typography, no speech bubbles, no backgrounds with scenes or gradients.",
+    "Output only the mascot character centered on a pure solid white background. The background must be fully white (#FFFFFF) with no shadows, gradients, or vignettes.",
+    "High contrast against white, clean edges, suitable for large-format vehicle wrap printing.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function concept(
   brand: BrandProfile,
   angle: "proof" | "offer" | "category" | "speed" | "premium" | "local",

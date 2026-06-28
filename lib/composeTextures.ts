@@ -59,13 +59,11 @@ const GENERATED_DIR = path.join(
 );
 const TRUNK_CTA_SIZE = { width: 2048, height: 640 };
 
-/** Long side surfaces get the wide decal; tops get the square pattern. */
-const SIDE_PARTS = new Set<PaintablePart>([
-  "door_left",
-  "door_right",
-  "panel_left",
-  "panel_right",
-]);
+/** Front doors get the wide ad decal. */
+const SIDE_PARTS = new Set<PaintablePart>(["door_left", "door_right"]);
+
+/** Rear panels get the brand avatar/mascot centered on the base coat. */
+const AVATAR_PARTS = new Set<PaintablePart>(["panel_left", "panel_right"]);
 
 /** Compose, write, and return the public URL of one part's texture. */
 async function composePart(
@@ -75,10 +73,16 @@ async function composePart(
   dir: string,
 ): Promise<string> {
   const cfg = carPartTextureConfig[part];
+  const baseColor = brand?.colors[0] ?? design.baseColor;
+
+  if (AVATAR_PARTS.has(part) && design.graphics.avatarUrl) {
+    await composeAvatarPart(part, design, brand, dir, cfg, baseColor);
+    return `/textures/generated/${design.id}/${part}.png`;
+  }
+
   const graphicUrl = SIDE_PARTS.has(part)
     ? design.graphics.decalUrl
     : design.graphics.patternUrl;
-  const baseColor = brand?.colors[0] ?? design.baseColor;
 
   // Always start with a solid base coat so sparse or transparent graphics never
   // reveal the model's default paint. Then apply the generated graphic over it.
@@ -119,32 +123,61 @@ async function composePart(
   return `/textures/generated/${design.id}/${part}.png`;
 }
 
+async function composeAvatarPart(
+  part: PaintablePart,
+  design: WrapDesign,
+  _brand: BrandProfile | undefined,
+  dir: string,
+  cfg: import("./carPartConfig").PartTextureConfig,
+  baseColor: string,
+): Promise<void> {
+  const avatarSource = await readFile(
+    publicPathToFs(design.graphics.avatarUrl as string),
+  );
+  const avatarSize = Math.round(Math.min(cfg.width, cfg.height) * 0.72);
+  const avatar = await sharp(avatarSource, { density: 200 })
+    .resize(avatarSize, avatarSize, { fit: "inside" })
+    .png()
+    .toBuffer();
+  const meta = await sharp(avatar).metadata();
+  const aw = meta.width ?? avatarSize;
+  const ah = meta.height ?? avatarSize;
+
+  const outPath = path.join(dir, `${part}.png`);
+  await sharp({
+    create: {
+      width: cfg.width,
+      height: cfg.height,
+      channels: 4,
+      background: baseColor,
+    },
+  })
+    .composite([
+      {
+        input: avatar,
+        top: Math.round((cfg.height - ah) / 2),
+        left: Math.round((cfg.width - aw) / 2),
+        blend: "over",
+      },
+    ])
+    .png()
+    .toFile(outPath);
+}
+
 async function composeHoodGraphic(
   design: WrapDesign,
   brand: BrandProfile | undefined,
   dir: string,
 ): Promise<string> {
   const cfg = carPartTextureConfig.hood;
-  const baseColor = brand?.colors[0] ?? design.baseColor;
+  const brandLogo = await loadBrandLogo(brand?.logoUrl);
 
   const outPath = path.join(dir, "hood-logo.png");
-  await sharp({
-    create: {
-      width: cfg.width,
-      height: cfg.height,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    },
-  })
-    .composite([
-      {
-        input: Buffer.from(generatedHoodLogoSvg(cfg, baseColor, brand)),
-        top: 0,
-        left: 0,
-      },
-    ])
-    .png()
-    .toFile(outPath);
+  const input = brandLogo
+    ? await brandLogoHoodPng(cfg, brandLogo)
+    : await transparentPng(cfg.width, cfg.height);
+
+  await sharp(input, { density: 200 }).png().toFile(outPath);
 
   return `/textures/generated/${design.id}/hood-logo.png`;
 }
@@ -223,34 +256,6 @@ function lockupSvg(
   </svg>`;
 }
 
-function generatedHoodLogoSvg(
-  cfg: PartTextureConfig,
-  baseColor: string,
-  brand: BrandProfile | undefined,
-): string {
-  const { width, height } = cfg;
-  const ink = readableInk(baseColor);
-  const accent = pickAccent(baseColor, brand);
-  const name = esc((brand?.name ?? "BRAND").toUpperCase());
-  const initials = esc(initialsFor(brand?.name ?? "BR"));
-  const markSize = Math.round(width * 0.34);
-  const centerX = Math.round(width / 2);
-  const markY = Math.round(height * 0.42);
-  const wordY = Math.round(height * 0.68);
-  const wordSize = Math.round(height * 0.085);
-  const mono = Math.round(markSize * 0.36);
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <g transform="translate(${centerX} ${markY})">
-      <path d="M 0 ${-markSize / 2} L ${markSize / 2} 0 L 0 ${markSize / 2} L ${-markSize / 2} 0 Z" fill="none" stroke="${ink}" stroke-width="${Math.max(18, Math.round(markSize * 0.08))}" stroke-linejoin="round"/>
-      <path d="M ${-markSize * 0.3} ${markSize * 0.15} C ${-markSize * 0.08} ${-markSize * 0.35}, ${markSize * 0.08} ${markSize * 0.35}, ${markSize * 0.3} ${-markSize * 0.15}" fill="none" stroke="${accent}" stroke-width="${Math.max(16, Math.round(markSize * 0.07))}" stroke-linecap="round"/>
-      <circle cx="0" cy="0" r="${markSize * 0.23}" fill="${ink}"/>
-      <text x="0" y="${mono * 0.34}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="800" font-size="${mono}" fill="${baseColor}" letter-spacing="0">${initials}</text>
-    </g>
-    <text x="${centerX}" y="${wordY}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="800" font-size="${wordSize}" letter-spacing="${wordSize * 0.08}" fill="${ink}">${name}</text>
-  </svg>`;
-}
-
 function generatedTrunkCtaSvg(
   size: { width: number; height: number },
   baseColor: string,
@@ -274,6 +279,83 @@ function generatedTrunkCtaSvg(
   </svg>`;
 }
 
+async function loadBrandLogo(logoUrl: string | null | undefined) {
+  if (!logoUrl) return null;
+
+  try {
+    if (logoUrl.startsWith("/")) {
+      return await readFile(publicPathToFs(logoUrl));
+    }
+
+    const url = new URL(logoUrl);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+
+    const response = await fetch(url, {
+      headers: { accept: "image/avif,image/webp,image/svg+xml,image/*,*/*" },
+    });
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType && !contentType.toLowerCase().includes("image/")) {
+      return null;
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function brandLogoHoodPng(
+  cfg: PartTextureConfig,
+  logoSource: Buffer,
+): Promise<Buffer> {
+  const maxLogoWidth = Math.round(cfg.width * 0.58);
+  const maxLogoHeight = Math.round(cfg.height * 0.42);
+  const logo = await sharp(logoSource, { density: 300 })
+    .rotate()
+    .resize(maxLogoWidth, maxLogoHeight, {
+      fit: "inside",
+    })
+    .ensureAlpha()
+    .png()
+    .toBuffer();
+  const metadata = await sharp(logo).metadata();
+  const logoWidth = metadata.width ?? maxLogoWidth;
+  const logoHeight = metadata.height ?? maxLogoHeight;
+
+  return sharp({
+    create: {
+      width: cfg.width,
+      height: cfg.height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([
+      {
+        input: logo,
+        top: Math.round((cfg.height - logoHeight) / 2),
+        left: Math.round((cfg.width - logoWidth) / 2),
+      },
+    ])
+    .png()
+    .toBuffer();
+}
+
+async function transparentPng(width: number, height: number): Promise<Buffer> {
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .png()
+    .toBuffer();
+}
+
 function fitSingleLineText(
   value: string,
   options: { maxWidth: number; maxSize: number; minSize: number },
@@ -283,31 +365,6 @@ function fitSingleLineText(
   const fitted = options.maxWidth / (normalizedLength * estimatedWidthPerEm);
   return Math.round(
     Math.max(options.minSize, Math.min(options.maxSize, fitted)),
-  );
-}
-
-function initialsFor(name: string): string {
-  const parts = name
-    .replace(/[^a-z0-9 ]/gi, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  const initials =
-    parts.length > 1
-      ? `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`
-      : (parts[0] ?? name).slice(0, 2);
-  return initials.toUpperCase();
-}
-
-function pickAccent(
-  baseColor: string,
-  brand: BrandProfile | undefined,
-): string {
-  const candidate = brand?.colors.find(
-    (color) => color.toLowerCase() !== baseColor.toLowerCase(),
-  );
-  return (
-    candidate ?? (readableInk(baseColor) === "#FFFFFF" ? "#93C5FD" : "#2563EB")
   );
 }
 

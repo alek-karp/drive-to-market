@@ -2,7 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { deriveBaseCoat } from "./baseColor";
-import { buildAdBackgroundPrompt, buildAdConcepts } from "./generateAdPrompt";
+import {
+  buildAdBackgroundPrompt,
+  buildAdConcepts,
+  buildAvatarPrompt,
+} from "./generateAdPrompt";
 import type { AdConcept, BrandProfile, WrapDesign } from "./types";
 
 /**
@@ -51,10 +55,11 @@ export async function generateAdDesign(
   if (!winner) throw new Error("Grok returned no image data.");
 
   const id = `${slug(brand.name)}-ai-ad`;
-  const [adUrl, baseCoat, trunkCta] = await Promise.all([
+  const [adUrl, baseCoat, trunkCta, avatarUrl] = await Promise.all([
     saveAd(id, winner, brand),
     Promise.resolve(deriveBaseCoat(brand)),
     requestTrunkCta(apiKey, brand, winner.concept),
+    generateAvatar(apiKey, id, brand),
   ]);
 
   return {
@@ -64,7 +69,7 @@ export async function generateAdDesign(
     baseColor: baseCoat.color,
     metalness: baseCoat.metalness,
     roughness: baseCoat.roughness,
-    graphics: { decalUrl: adUrl, patternUrl: adUrl, trunkCta },
+    graphics: { decalUrl: adUrl, patternUrl: adUrl, trunkCta, avatarUrl },
     textures: {},
   };
 }
@@ -205,6 +210,58 @@ const GENERATED_DIR = path.join(
   "textures",
   "generated",
 );
+
+async function generateAvatar(
+  apiKey: string,
+  designId: string,
+  brand: BrandProfile,
+): Promise<string | undefined> {
+  try {
+    const prompt = buildAvatarPrompt(brand);
+    const images = await requestGrokImages(apiKey, prompt, 1);
+    const image = images[0];
+    if (!image) return undefined;
+
+    const dir = path.join(GENERATED_DIR, designId);
+    await mkdir(dir, { recursive: true });
+
+    const avatar = await removeWhiteBackground(
+      Buffer.from(image.b64, "base64"),
+    );
+    await writeFile(path.join(dir, "avatar.png"), avatar);
+    return `/textures/generated/${designId}/avatar.png`;
+  } catch {
+    return undefined;
+  }
+}
+
+async function removeWhiteBackground(input: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(input)
+    .resize(1024, 1024, {
+      fit: "contain",
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  // Buffer may be a slice of a Node pool — copy it so we own the ArrayBuffer.
+  const pixels = Buffer.from(data);
+  for (let i = 0; i < pixels.length; i += 4) {
+    const brightness = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+    if (brightness > 230) {
+      pixels[i + 3] = 0;
+    } else if (brightness > 200) {
+      pixels[i + 3] = Math.round(((230 - brightness) / 30) * 255);
+    }
+  }
+
+  return sharp(pixels, {
+    raw: { width: info.width, height: info.height, channels: 4 },
+  })
+    .png()
+    .toBuffer();
+}
 
 async function saveAd(
   designId: string,
