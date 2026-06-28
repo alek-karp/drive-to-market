@@ -6,4 +6,5 @@ Commit format: `prefix(area): message`. No description.
 Use `bun` for package management and scripts, not `npm`.
 Never stage or commit files without prior request.
 Never build or run the dev server. The only validation is linting.
+Update `ARCHITECTURE.md` whenever a change alters architecture decisions or current system structure.
 <!-- END:nextjs-agent-rules -->
