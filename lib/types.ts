@@ -46,6 +46,12 @@ export interface WrapGraphics {
   decalUrl: string;
   /** Square hood/roof pattern. */
   patternUrl: string;
+  /** Dedicated transparent hood badge/logo graphic generated from brand data. */
+  hoodUrl?: string;
+  /** Dedicated transparent trunk CTA graphic generated from brand data. */
+  trunkUrl?: string;
+  /** Short LLM-generated trunk CTA copy rendered into the trunk graphic. */
+  trunkCta?: string;
 }
 
 /** A generated wrap concept the user can pick (Stage 5/8). */

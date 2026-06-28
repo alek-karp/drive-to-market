@@ -91,6 +91,7 @@ export default function Home() {
       });
       const composedDesign = {
         ...aiDesign,
+        graphics: composeRes.graphics as WrapDesign["graphics"],
         textures: composeRes.textures as WrapDesign["textures"],
       };
       setDesigns([composedDesign]);
@@ -418,6 +419,14 @@ function buildAssetList(design: WrapDesign) {
     `${design.id}-pattern`,
     "Pattern graphic",
     design.graphics.patternUrl,
+  );
+  pushAsset(`${design.id}-hood`, "Hood logo graphic", design.graphics.hoodUrl);
+  pushAsset(
+    `${design.id}-trunk`,
+    design.graphics.trunkCta
+      ? `Trunk CTA: ${design.graphics.trunkCta}`
+      : "Trunk CTA graphic",
+    design.graphics.trunkUrl,
   );
 
   Object.entries(design.textures).forEach(([part, url]) => {

@@ -271,7 +271,7 @@ export function CarModel({
     // keeps its aspect ratio, conforms to body curvature, and never spills onto
     // glass or wheels.
     if (isAiAdDesign(design)) {
-      return applyAdDecals(paintMeshes, design.graphics.decalUrl, design);
+      return applyAdDecals(paintMeshes, design);
     }
 
     // Legacy per-part wrap textures (procedural concepts). Each logical part
@@ -323,6 +323,15 @@ export function CarModel({
     }
   }, [highlight, meshCategory]);
 
+  // Generated wraps provide their own brand marks and CTAs, so stock badges
+  // from the source car model should not compete with the wrap graphics.
+  useEffect(() => {
+    const showStockAccents = !design;
+    for (const [mesh, category] of meshCategory) {
+      if (category === "accents") mesh.visible = showStockAccents;
+    }
+  }, [design, meshCategory]);
+
   function handleClick(event: ThreeEvent<MouseEvent>) {
     if (!onSelect) return;
     const target = event.object;
@@ -351,8 +360,8 @@ function restoreOriginalUvs(originalUvs: Map<Mesh, Float32Array | null>): void {
   }
 }
 
-/** Aspect ratio of the generated ad (2048×1024). Decal footprints match it so
- *  the artwork is never stretched. */
+/** Aspect ratio of the generated ad (2048×1024). Slot-specific generated
+ * graphics override this where needed. */
 const AD_ASPECT = 2;
 
 /**
@@ -364,6 +373,8 @@ interface DecalSlot {
   along: number;
   side: -1 | 0 | 1;
   surface: "side" | "top" | "rear";
+  graphic: "ad" | "hood" | "trunk";
+  aspect?: number;
   /** Side/rear slots: normalized height up the body (0 floor → 1 roof). */
   heightFrac?: number;
   /** Decal width as a fraction of the body's length (sides) or width (tops/rear). */
@@ -371,12 +382,55 @@ interface DecalSlot {
 }
 
 const AD_DECAL_SLOTS: DecalSlot[] = [
-  { along: 0.6, side: -1, surface: "side", heightFrac: 0.46, widthFrac: 0.34 },
-  { along: 0.6, side: 1, surface: "side", heightFrac: 0.46, widthFrac: 0.34 },
-  { along: 0.32, side: -1, surface: "side", heightFrac: 0.46, widthFrac: 0.3 },
-  { along: 0.32, side: 1, surface: "side", heightFrac: 0.46, widthFrac: 0.3 },
-  { along: 0.8, side: 0, surface: "top", widthFrac: 0.55 },
-  { side: 0, surface: "rear", along: 0, heightFrac: 0.42, widthFrac: 0.4 },
+  {
+    along: 0.6,
+    side: -1,
+    surface: "side",
+    graphic: "ad",
+    heightFrac: 0.46,
+    widthFrac: 0.34,
+  },
+  {
+    along: 0.6,
+    side: 1,
+    surface: "side",
+    graphic: "ad",
+    heightFrac: 0.46,
+    widthFrac: 0.34,
+  },
+  {
+    along: 0.32,
+    side: -1,
+    surface: "side",
+    graphic: "ad",
+    heightFrac: 0.46,
+    widthFrac: 0.3,
+  },
+  {
+    along: 0.32,
+    side: 1,
+    surface: "side",
+    graphic: "ad",
+    heightFrac: 0.46,
+    widthFrac: 0.3,
+  },
+  {
+    along: 0.8,
+    side: 0,
+    surface: "top",
+    graphic: "hood",
+    aspect: 1,
+    widthFrac: 0.5,
+  },
+  {
+    side: 0,
+    surface: "rear",
+    graphic: "trunk",
+    aspect: 3.2,
+    along: 0,
+    heightFrac: 0.48,
+    widthFrac: 0.38,
+  },
 ];
 
 /**
@@ -393,11 +447,7 @@ const AD_DECAL_SLOTS: DecalSlot[] = [
  *
  * Returns a cleanup that detaches and disposes every decal.
  */
-function applyAdDecals(
-  meshes: Mesh[],
-  textureUrl: string,
-  design: WrapDesign,
-): () => void {
+function applyAdDecals(meshes: Mesh[], design: WrapDesign): () => void {
   if (meshes.length === 0) return () => {};
 
   for (const mesh of meshes) mesh.updateWorldMatrix(true, false);
@@ -415,6 +465,7 @@ function applyAdDecals(
 
   const raycaster = new Raycaster();
   const decals: Mesh[] = [];
+  const decalsByTexture = new Map<string, Mesh[]>();
 
   for (const slot of AD_DECAL_SLOTS) {
     const origin = new Vector3();
@@ -471,7 +522,7 @@ function applyAdDecals(
       upWorld,
       {
         width: widthWorld,
-        height: widthWorld / AD_ASPECT,
+        height: widthWorld / (slot.aspect ?? AD_ASPECT),
         depth: depthWorld,
       },
     );
@@ -483,32 +534,44 @@ function applyAdDecals(
     material.roughness = design.roughness;
     (hit.object as Mesh).add(decal);
     decals.push(decal);
+    const slotTextureUrl =
+      slot.graphic === "hood"
+        ? (design.graphics.hoodUrl ?? design.graphics.decalUrl)
+        : slot.graphic === "trunk"
+          ? (design.graphics.trunkUrl ?? design.graphics.decalUrl)
+          : design.graphics.decalUrl;
+    const textureDecals = decalsByTexture.get(slotTextureUrl) ?? [];
+    textureDecals.push(decal);
+    decalsByTexture.set(slotTextureUrl, textureDecals);
   }
 
   let cancelled = false;
   const loader = new TextureLoader();
-  const texture = loader.load(textureUrl, (t) => {
-    if (cancelled) {
-      t.dispose();
-      return;
-    }
-    t.colorSpace = SRGBColorSpace;
-    for (const decal of decals) {
-      const material = decal.material as MeshStandardMaterial;
-      material.map = t;
-      material.color.set("#ffffff");
-      material.needsUpdate = true;
-    }
-  });
+  const textures: Texture[] = [];
+  for (const [url, textureDecals] of decalsByTexture) {
+    const texture = loader.load(url, (t) => {
+      if (cancelled) {
+        t.dispose();
+        return;
+      }
+      t.colorSpace = SRGBColorSpace;
+      for (const decal of textureDecals) {
+        const material = decal.material as MeshStandardMaterial;
+        material.map = t;
+        material.color.set("#ffffff");
+        material.needsUpdate = true;
+      }
+    });
+    textures.push(texture);
+  }
 
   return () => {
     cancelled = true;
-    texture.dispose();
+    for (const texture of textures) texture.dispose();
     for (const decal of decals) {
       decal.parent?.remove(decal);
       decal.geometry.dispose();
       const material = decal.material as MeshStandardMaterial;
-      material.map?.dispose();
       material.dispose();
     }
   };
@@ -562,6 +625,7 @@ function buildDecal(
     geometry,
     new MeshStandardMaterial({
       transparent: true,
+      alphaTest: 0.05,
       polygonOffset: true,
       polygonOffsetFactor: -10,
       polygonOffsetUnits: -10,

@@ -22,8 +22,8 @@ export const POST = async (request: Request) => {
 
   try {
     // brand is optional: without it we still compose the graphic, just no name.
-    const textures = await composeTextures(normalizedDesign, normalizedBrand);
-    return NextResponse.json({ textures });
+    const result = await composeTextures(normalizedDesign, normalizedBrand);
+    return NextResponse.json(result);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Texture composition failed";
@@ -64,8 +64,17 @@ const normalizeGraphics = (
   const candidate = value as Partial<WrapDesign["graphics"]>;
   const decalUrl = candidate.decalUrl?.trim();
   const patternUrl = candidate.patternUrl?.trim();
+  const hoodUrl = candidate.hoodUrl?.trim();
+  const trunkUrl = candidate.trunkUrl?.trim();
+  const trunkCta = candidate.trunkCta?.trim();
 
   if (!decalUrl || !patternUrl) return null;
 
-  return { decalUrl, patternUrl };
+  return {
+    decalUrl,
+    patternUrl,
+    ...(hoodUrl ? { hoodUrl } : {}),
+    ...(trunkUrl ? { trunkUrl } : {}),
+    ...(trunkCta ? { trunkCta } : {}),
+  };
 };

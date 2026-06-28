@@ -51,9 +51,10 @@ export async function generateAdDesign(
   if (!winner) throw new Error("Grok returned no image data.");
 
   const id = `${slug(brand.name)}-ai-ad`;
-  const [adUrl, baseCoat] = await Promise.all([
+  const [adUrl, baseCoat, trunkCta] = await Promise.all([
     saveAd(id, winner, brand),
     Promise.resolve(deriveBaseCoat(brand)),
+    requestTrunkCta(apiKey, brand, winner.concept),
   ]);
 
   return {
@@ -63,7 +64,7 @@ export async function generateAdDesign(
     baseColor: baseCoat.color,
     metalness: baseCoat.metalness,
     roughness: baseCoat.roughness,
-    graphics: { decalUrl: adUrl, patternUrl: adUrl },
+    graphics: { decalUrl: adUrl, patternUrl: adUrl, trunkCta },
     textures: {},
   };
 }
@@ -71,6 +72,7 @@ export async function generateAdDesign(
 /** Where Grok's image model is reached. Overridable for self-hosting/tests. */
 const XAI_BASE_URL = process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
 const XAI_IMAGE_MODEL = process.env.XAI_IMAGE_MODEL ?? "grok-imagine-image";
+const XAI_TEXT_MODEL = process.env.XAI_TEXT_MODEL ?? "grok-3-mini";
 const OUTPUT_W = 2048;
 const OUTPUT_H = 1024;
 
@@ -125,6 +127,76 @@ async function requestGrokImages(
 
   if (images.length === 0) throw new Error("Grok returned no image data.");
   return images;
+}
+
+async function requestTrunkCta(
+  apiKey: string,
+  brand: BrandProfile,
+  concept: AdConcept,
+): Promise<string> {
+  const res = await fetch(`${XAI_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: XAI_TEXT_MODEL,
+      temperature: 0.9,
+      max_tokens: 24,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You write concise outdoor ad copy for vehicle wraps. Return only one CTA line. No quotation marks. No punctuation except apostrophes. No hashtags. No URLs.",
+        },
+        {
+          role: "user",
+          content: [
+            "Write a catchy CTA for the rear trunk decal of a branded car wrap.",
+            "It should relate to driving, roads, speed, parking, lanes, miles, or motion only when that metaphor fits the brand.",
+            "Do not mechanically prepend words like Drive to an existing website CTA.",
+            "Do not use generic web button text like Get Started, Learn More, Sign Up, Contact Us, or Book Now.",
+            "Keep it 3 to 5 words, readable at a distance, punchy, and brand-relevant.",
+            `Brand name: ${brand.name}`,
+            `Brand description: ${brand.description}`,
+            `Headline: ${brand.headlineText}`,
+            `Offer: ${brand.offer}`,
+            `Audience: ${brand.audience}`,
+            `Differentiators: ${brand.differentiators.slice(0, 3).join(", ")}`,
+            `Ad hook: ${concept.hook}`,
+            `Ad subheader: ${concept.subheader}`,
+          ].join("\n"),
+        },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `Grok trunk CTA request failed (${res.status}): ${detail.slice(0, 300)}`,
+    );
+  }
+
+  const json = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const text = cleanTrunkCta(json.choices?.[0]?.message?.content);
+  if (!text) throw new Error("Grok returned no trunk CTA copy.");
+  return text;
+}
+
+function cleanTrunkCta(value: string | undefined): string {
+  return (value ?? "")
+    .replace(/["“”]/g, "")
+    .replace(/[^\w' -]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .slice(0, 5)
+    .join(" ")
+    .toUpperCase();
 }
 
 const GENERATED_DIR = path.join(
