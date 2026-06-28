@@ -1,12 +1,7 @@
 // Shared types for the vehicle-wrap demo pipeline.
 
 /** Decorative overlay style for the livery background (Stage 3). */
-export type PatternType =
-  | "ai"
-  | "none"
-  | "shards"
-  | "speedlines"
-  | "fracture";
+export type PatternType = "ai" | "none" | "shards" | "speedlines" | "fracture";
 
 /** Stage 3 output: AI-generated (or fallback) livery pattern. */
 export interface Pattern {
@@ -44,6 +39,10 @@ export interface BrandProfile {
   tone: string;
   differentiators: string[];
   requiredCta: string;
+  /** Known brand mascot name (e.g. "Max the hedgehog"), or null if none. */
+  mascotName?: string | null;
+  /** Visual description of the real mascot, for faithful recreation. */
+  mascotDescription?: string | null;
 }
 
 /** Deterministic marketing plan used before asking an image model for art. */

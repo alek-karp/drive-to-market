@@ -50,6 +50,17 @@ Per the asset architecture doc, files are stored in Convex File Storage; the dat
 
 Upload flow: `generateUploadUrl` → POST bytes → `createAsset`. The 3D viewer resolves `tesla.glb` via `assets:getTeslaModelUrl` and falls back to `/models/tesla.glb` when Convex is unavailable or the asset is missing. Seed models default to `tesla.glb` only (`MODEL_FILES` env overrides).
 
+## Brand Extraction (Exa)
+
+`convex/brand.ts` (`brand:extractFromUrl`) is the Exa-backed Stage 1. It runs, in parallel:
+- a grounded `getContents` summary (schema) on the submitted URL for name/description/category/tone/etc.;
+- `findBrandKitColors` — an Exa web search of brand-guideline/press/kit pages, scraping exact hex codes (most-cited brand color first);
+- `findMascot` — an Exa web search determining whether the brand has a real mascot (e.g. PostHog → hedgehog, GitHub → Mona the Octocat) with a visual description.
+
+`lib/extractBrand.ts` then runs `lib/brandVisuals.ts` (`enhanceBrandVisuals`): it resolves a real logo mark (rejecting hero/og/`.ico` images, falling back to Google's favicon service) and finalizes the palette — official brand-kit colors win when found, otherwise colors are derived from the logo image via `sharp`. `lib/scrapeWebsite.ts` is the fallback when Exa/Convex is unavailable.
+
+Mascot fields flow into `BrandProfile.mascotName`/`mascotDescription`. `buildAvatarPrompt` recreates a known mascot faithfully, or invents one only when none exists.
+
 
 Two Tesla GLBs live in `public/models/`:
 

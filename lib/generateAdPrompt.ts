@@ -71,18 +71,42 @@ export function buildPatternSvgPrompt(
 export function buildAvatarPrompt(brand: BrandProfile): string {
   const primaryColor = brand.colors[0] ?? "the primary brand color";
   const accentColor = brand.colors[1] ?? "a complementary accent color";
+  const mascotName = brand.mascotName?.trim();
+  const mascotDescription = brand.mascotDescription?.trim();
 
-  return [
-    `Create a bold, friendly mascot or character avatar for the brand "${brand.name}" (${brand.category}).`,
+  const shared = [
     `Audience: ${brand.audience}. Tone: ${brand.tone}.`,
-    `The mascot should visually embody the brand's personality and be instantly recognizable.`,
     `Design it as a single centered character or creature illustration — clean, vector-style, with strong outlines.`,
-    `Use ${primaryColor} as the dominant color and ${accentColor} as an accent.`,
     `The character should fill the center of the image with generous white padding around it.`,
-    "Make it charming, simple, and memorable — the kind of mascot you'd put on a vehicle decal.",
     "No text, no logos, no typography, no speech bubbles, no backgrounds with scenes or gradients.",
     "Output only the mascot character centered on a pure solid white background. The background must be fully white (#FFFFFF) with no shadows, gradients, or vignettes.",
     "High contrast against white, clean edges, suitable for large-format vehicle wrap printing.",
+  ];
+
+  // When the brand has a real, recognizable mascot (e.g. PostHog's Max the
+  // hedgehog), recreate THAT character faithfully instead of inventing one.
+  if (mascotName || mascotDescription) {
+    return [
+      `Recreate the official brand mascot of "${brand.name}"${
+        mascotName ? `, known as "${mascotName}"` : ""
+      }, as faithfully as possible.`,
+      mascotDescription
+        ? `Mascot description: ${mascotDescription}.`
+        : `Match the mascot's real species, colors, and signature features exactly.`,
+      "Stay true to the real character's species, color, proportions, and distinctive features — do not invent a different animal or restyle it.",
+      ...shared,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  // No known mascot — invent one that embodies the brand.
+  return [
+    `Create a bold, friendly mascot or character avatar for the brand "${brand.name}" (${brand.category}).`,
+    `The mascot should visually embody the brand's personality and be instantly recognizable.`,
+    `Use ${primaryColor} as the dominant color and ${accentColor} as an accent.`,
+    "Make it charming, simple, and memorable — the kind of mascot you'd put on a vehicle decal.",
+    ...shared,
   ]
     .filter(Boolean)
     .join(" ");

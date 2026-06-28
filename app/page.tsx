@@ -4,7 +4,6 @@ import { CheckIcon, CircleIcon, EyeIcon, LoaderCircleIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useState } from "react";
-import { CityScene } from "@/components/CityScene";
 import { DesignPicker } from "@/components/DesignPicker";
 import { ModeToggle } from "@/components/mode-toggle";
 import { UrlInput } from "@/components/UrlInput";
@@ -56,7 +55,6 @@ export default function Home() {
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [designs, setDesigns] = useState<WrapDesign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showCity, setShowCity] = useState(false);
 
   const selectedDesign = designs.find((d) => d.id === selectedId) ?? null;
 
@@ -208,7 +206,7 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* Right: 3D preview + city demo */}
+      {/* Right: 3D preview */}
       <main className="relative flex min-h-0 flex-1 flex-col">
         <div className="relative min-h-0 flex-1">
           {status === "ready" ? (
@@ -222,7 +220,6 @@ export default function Home() {
               }
             />
           )}
-          {showCity && <CityScene onClose={() => setShowCity(false)} />}
         </div>
 
         <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border p-4">
@@ -254,14 +251,6 @@ export default function Home() {
               </DialogContent>
             )}
           </Dialog>
-
-          <Button
-            type="button"
-            disabled={status !== "ready"}
-            onClick={() => setShowCity(true)}
-          >
-            City Demo
-          </Button>
         </div>
       </main>
     </div>

@@ -20,6 +20,8 @@ export type BrandProfileResult = {
   tone: string;
   differentiators: string[];
   requiredCta: string;
+  mascotName: string | null;
+  mascotDescription: string | null;
 };
 
 const BRAND_OUTPUT_SCHEMA = {
@@ -34,7 +36,10 @@ const BRAND_OUTPUT_SCHEMA = {
     offer: { type: "string" },
     requiredCta: { type: "string" },
     logoUrl: { type: "string" },
+    colors: { type: "array", items: { type: "string" } },
     keywords: { type: "array", items: { type: "string" } },
+    mascotName: { type: "string" },
+    mascotDescription: { type: "string" },
   },
   required: ["name", "description"],
 };
@@ -49,7 +54,10 @@ type ExaBrandFields = {
   offer?: string;
   requiredCta?: string;
   logoUrl?: string;
+  colors?: string[];
   keywords?: string[];
+  mascotName?: string;
+  mascotDescription?: string;
 };
 
 /** Stage 1: URL → brand profile via Exa (contents + structured search). */
@@ -73,49 +81,46 @@ export const extractFromUrl = action({
     const exa = new Exa(apiKey);
 
     let pageText = "";
-    let pageImage: string | null = null;
+    let pageFavicon: string | null = null;
+    let extracted: ExaBrandFields | null = null;
 
+    // Single grounded call: text + a structured summary extracted from the
+    // ACTUAL page (more reliable than a web search with outputSchema).
     try {
       const contents = await exa.getContents([normalizedUrl], {
         text: { maxCharacters: 6000 },
-        highlights: {
-          query: "brand logo colors tagline product mission",
-          numSentences: 5,
-          highlightsPerUrl: 5,
+        summary: {
+          query:
+            "Extract the brand identity for a vehicle wrap. " +
+            "colors: the brand's official palette as hex codes (e.g. #FF7A00), the primary/most-recognizable brand color FIRST, then secondary/accent colors — the colors used in the logo and brand identity, NOT generic page background colors. " +
+            "logoUrl: a direct https URL to the company's actual logo image file (.svg/.png/.webp). Do NOT use a hero image, product screenshot, social share/og:image, or marketing banner. Omit if unknown. " +
+            "mascotName: the brand's well-known mascot/character name if it has one (e.g. PostHog has 'Max the hedgehog', GitHub has 'Octocat', Duolingo has 'Duo the owl'). Omit if the brand has no real mascot. " +
+            "mascotDescription: a precise visual description of that real mascot (species/character, colors, distinctive features) so it can be recreated faithfully. Omit if no real mascot.",
+          schema: BRAND_OUTPUT_SCHEMA,
         },
         livecrawl: "fallback",
       });
       const page = contents.results[0];
       if (page) {
         pageText = page.text ?? "";
-        const extras = page as { image?: string; favicon?: string };
-        pageImage = extras.image ?? extras.favicon ?? null;
+        // Favicon is a real brand mark; `image` is usually a hero/og screenshot,
+        // so we intentionally do NOT use it as the logo.
+        const extras = page as { favicon?: string; summary?: string };
+        pageFavicon = normalizeUrlOrNull(extras.favicon);
+        extracted = parseStructuredOutput(extras.summary);
       }
-    } catch {
-      // Continue with structured search only.
-    }
-
-    let extracted: ExaBrandFields | null = null;
-    try {
-      const search = await exa.search(
-        `${fallbackName} (${host}) company brand overview colors logo tagline`,
-        {
-          type: "auto",
-          category: "company",
-          numResults: 5,
-          includeDomains: [host],
-          contents: false,
-          outputSchema: BRAND_OUTPUT_SCHEMA,
-          systemPrompt:
-            "Extract factual brand information for vehicle wrap design. logoUrl must be a direct https image URL when known; otherwise omit.",
-        },
-      );
-      extracted = parseStructuredOutput(search.output?.content);
     } catch {
       extracted = null;
     }
 
     const name = truncate(extracted?.name?.trim() || fallbackName, 60);
+
+    // These need web research (not just the homepage), so run dedicated searches.
+    const [kitColors, mascot] = await Promise.all([
+      findBrandKitColors(exa, name, host),
+      findMascot(exa, name, host),
+    ]);
+
     const description = truncate(
       collapse(
         extracted?.description ||
@@ -134,13 +139,21 @@ export const extractFromUrl = action({
       120,
     );
     const keywords = sanitizeList(extracted?.keywords, 6);
-    const colors = extractColors(pageText, description);
+    // Brand-kit hexes lead (most authoritative), then the summary's colors,
+    // then any hexes spotted in the page text.
+    const colors = resolveColors(
+      [...kitColors, ...(extracted?.colors ?? [])],
+      pageText,
+    );
+    // Logo/colors are finalized client-side from a real logo mark
+    // (lib/brandVisuals). Pass through any explicit logo or the favicon as hints.
+    const logoUrl = normalizeUrlOrNull(extracted?.logoUrl) ?? pageFavicon;
 
     return {
       name,
       description,
       colors,
-      logoUrl: normalizeUrlOrNull(extracted?.logoUrl) ?? pageImage,
+      logoUrl,
       websiteUrl: normalizedUrl,
       screenshotPath: null,
       headlineText,
@@ -159,9 +172,127 @@ export const extractFromUrl = action({
           ? keywords.slice(0, 4)
           : ["premium", "local", "fast", "modern"],
       requiredCta: extracted?.requiredCta?.trim() || "Get Started",
+      mascotName: mascot.name ?? cleanMascot(extracted?.mascotName),
+      mascotDescription:
+        mascot.description ?? cleanMascot(extracted?.mascotDescription),
     };
   },
 });
+
+const MASCOT_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    hasMascot: { type: "boolean" },
+    mascotName: { type: "string" },
+    mascotDescription: { type: "string" },
+  },
+  required: ["hasMascot"],
+};
+
+/**
+ * Research whether a brand has a real, well-known mascot (e.g. PostHog → "Max
+ * the hedgehog", GitHub → "Octocat"). Uses a web search so the model can draw
+ * on knowledge beyond the brand's homepage. Returns nulls when none is found.
+ */
+async function findMascot(
+  exa: Exa,
+  name: string,
+  host: string,
+): Promise<{ name: string | null; description: string | null }> {
+  try {
+    const result = await exa.search(
+      `Does the company ${name} (${host}) have an official mascot or brand character? What is its name and what does it look like?`,
+      {
+        type: "auto",
+        numResults: 5,
+        contents: {
+          text: { maxCharacters: 1500 },
+          highlights: {
+            query: `${name} official mascot character name appearance`,
+            numSentences: 3,
+            highlightsPerUrl: 3,
+          },
+        },
+        outputSchema: MASCOT_SCHEMA,
+        systemPrompt:
+          "Determine if the company has a REAL, officially recognized mascot or brand character. " +
+          "hasMascot must be true only for an actual named mascot the company uses (not a logo, not the founder, not a generic icon). " +
+          "mascotName: the mascot's name. mascotDescription: species/character, colors, and distinctive visual features. " +
+          "If there is no real mascot, set hasMascot to false and omit the other fields.",
+      },
+    );
+
+    const parsed = parseStructuredOutput(result.output?.content) as {
+      hasMascot?: boolean;
+      mascotName?: string;
+      mascotDescription?: string;
+    } | null;
+
+    if (!parsed?.hasMascot) return { name: null, description: null };
+    return {
+      name: cleanMascot(parsed.mascotName),
+      description: cleanMascot(parsed.mascotDescription),
+    };
+  } catch {
+    return { name: null, description: null };
+  }
+}
+
+/**
+ * Find the brand's official palette by searching brand-guideline / press / kit
+ * pages, which usually spell out exact hex codes in their text. Returns hexes
+ * ordered by frequency (most-cited brand color first).
+ */
+async function findBrandKitColors(
+  exa: Exa,
+  name: string,
+  host: string,
+): Promise<string[]> {
+  try {
+    const result = await exa.search(
+      `${name} (${host}) official brand guidelines color palette hex codes brand kit press`,
+      {
+        type: "auto",
+        numResults: 4,
+        contents: {
+          text: { maxCharacters: 2500 },
+          highlights: {
+            query: "official brand colors hex codes palette",
+            numSentences: 3,
+            highlightsPerUrl: 3,
+          },
+        },
+      },
+    );
+
+    const counts = new Map<string, number>();
+    for (const r of result.results) {
+      const haystack = `${r.text ?? ""} ${(r.highlights ?? []).join(" ")}`;
+      for (const m of haystack.matchAll(
+        /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g,
+      )) {
+        const hex = normalizeHex(m[0]);
+        if (!hex) continue;
+        counts.set(hex, (counts.get(hex) ?? 0) + 1);
+      }
+    }
+
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([hex]) => hex)
+      .filter((hex) => !isNeutral(hex))
+      .slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
+function cleanMascot(value: string | undefined): string | null {
+  const text = value?.trim();
+  if (!text) return null;
+  if (/^(none|n\/a|null|unknown|no mascot)$/i.test(text)) return null;
+  return truncate(collapse(text), 240);
+}
 
 function parseStructuredOutput(content: unknown): ExaBrandFields | null {
   if (!content) return null;
@@ -235,28 +366,53 @@ function sanitizeList(value: string[] | undefined, max: number): string[] {
   return out;
 }
 
-function extractColors(text: string, description: string): string[] {
-  const haystack = `${text} ${description}`;
+/**
+ * Brand palette, primary color first. Prefers the colors Exa extracted from the
+ * brand identity; falls back to any hex codes found in page text, then defaults.
+ * Leads with a saturated (non-neutral) brand color so the car body isn't a dull
+ * black/white default.
+ */
+function resolveColors(
+  modelColors: string[] | undefined,
+  pageText: string,
+): string[] {
   const ordered: string[] = [];
   const seen = new Set<string>();
-
-  for (const match of haystack.matchAll(
-    /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g,
-  )) {
-    const hex = normalizeHex(match[0]);
+  const add = (raw: string) => {
+    const hex = normalizeHex(raw);
     if (hex && !seen.has(hex)) {
       seen.add(hex);
       ordered.push(hex);
+    }
+  };
+
+  if (Array.isArray(modelColors)) {
+    for (const c of modelColors) {
+      if (typeof c === "string") add(c);
+    }
+  }
+
+  if (ordered.length === 0) {
+    for (const m of pageText.matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)) {
+      add(m[0]);
       if (ordered.length >= 4) break;
     }
   }
 
   if (ordered.length === 0) {
-    return ["#111111", "#F4C542", "#FFFFFF"];
+    return ["#F4C542", "#111111", "#FFFFFF"];
   }
+
+  ordered.sort((a, b) => (isNeutral(a) ? 1 : 0) - (isNeutral(b) ? 1 : 0));
+
   if (!ordered.some(isLight)) ordered.push("#FFFFFF");
   if (!ordered.some(isDark)) ordered.push("#111111");
   return ordered.slice(0, 4);
+}
+
+function isNeutral(hex: string): boolean {
+  const [r, g, b] = rgb(hex);
+  return Math.max(r, g, b) - Math.min(r, g, b) < 24;
 }
 
 function normalizeHex(raw: string): string | null {

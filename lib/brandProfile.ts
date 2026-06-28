@@ -22,6 +22,8 @@ export function normalizeBrandProfile(value: unknown): BrandProfile | null {
     tone: candidate.tone?.trim() ?? "confident and approachable",
     differentiators: sanitizeKeywords(candidate.differentiators),
     requiredCta: candidate.requiredCta?.trim() ?? "Get Started",
+    mascotName: normalizeNullableString(candidate.mascotName),
+    mascotDescription: normalizeNullableString(candidate.mascotDescription),
   };
 }
 
