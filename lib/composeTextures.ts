@@ -74,6 +74,24 @@ async function composePart(
     .resize(cfg.width, cfg.height, { fit: "fill" })
     .png()
     .toBuffer();
+
+  // Build the full overlay stack in one composite call. sharp's `composite()`
+  // replaces — not appends — its layer list on each call, so the graphic and
+  // the lockup must go in together or the last call would drop the graphic.
+  const layers: sharp.OverlayOptions[] = [
+    { input: graphic, top: 0, left: 0, blend: "over" },
+  ];
+  // The AI ad already bakes the company name into its graphic; stamping the
+  // lockup on top of it would double the wordmark. Only procedural designs
+  // (whose SVG graphics carry no text) get the lockup.
+  if (brand && cfg.logoPosition && !graphicHasName(design)) {
+    layers.push({
+      input: Buffer.from(lockupSvg(cfg, baseColor, brand)),
+      top: 0,
+      left: 0,
+    });
+  }
+
   const texture = sharp({
     create: {
       width: cfg.width,
@@ -81,17 +99,16 @@ async function composePart(
       channels: 4,
       background: baseColor,
     },
-  }).composite([{ input: graphic, top: 0, left: 0, blend: "multiply" }]);
-
-  // Overlay a company-name lockup wherever the part config anchors a logo.
-  if (brand && cfg.logoPosition) {
-    const overlay = Buffer.from(lockupSvg(cfg, baseColor, brand));
-    texture.composite([{ input: overlay, top: 0, left: 0 }]);
-  }
+  }).composite(layers);
 
   const outPath = path.join(dir, `${part}.png`);
   await texture.png().toFile(outPath);
   return `/textures/generated/${design.id}/${part}.png`;
+}
+
+/** The AI ad design composites the company name into its own graphic. */
+function graphicHasName(design: WrapDesign): boolean {
+  return design.style === "AI Ad";
 }
 
 /** Map a `/public`-relative URL back to its filesystem path. */
@@ -102,10 +119,9 @@ function publicPathToFs(url: string): string {
 // --- text lockup -------------------------------------------------------------
 
 /**
- * Render the brand name (and a short tagline) as an SVG overlay sized to the
- * full part. Square tops center the lockup; wide sides anchor it left, matching
- * the per-part anchors in {@link carPartTextureConfig}. A translucent plate
- * keeps the text readable over any graphic.
+ * Render the brand name as an SVG overlay sized to the full part. Square tops
+ * center the lockup; wide sides anchor it left, matching the per-part anchors
+ * in {@link carPartTextureConfig}.
  */
 function lockupSvg(
   cfg: PartTextureConfig,
@@ -120,19 +136,12 @@ function lockupSvg(
   const ink = readableInk(baseColor);
 
   const nameSize = Math.round(height * 0.11);
-  const tagSize = Math.round(height * 0.05);
   const name = esc(brand.name.toUpperCase());
-  const tagline = esc(truncate(brand.headlineText || brand.description, 42));
 
   const anchor = centered ? "middle" : "start";
 
-  const taglineEl = tagline
-    ? `<text x="${x}" y="${y + tagSize * 1.5}" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="${tagSize}" letter-spacing="${tagSize * 0.12}" fill="${ink}" opacity="0.85">${tagline}</text>`
-    : "";
-
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
     <text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-weight="700" font-size="${nameSize}" letter-spacing="${nameSize * 0.06}" fill="${ink}">${name}</text>
-    ${taglineEl}
   </svg>`;
 }
 
@@ -154,11 +163,6 @@ function readableInk(baseColor: string): string {
   const b = n & 255;
   const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   return luminance > 0.6 ? "#111111" : "#FFFFFF";
-}
-
-function truncate(s: string, max: number): string {
-  const t = s.trim();
-  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
 }
 
 function esc(s: string): string {

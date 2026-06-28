@@ -122,7 +122,7 @@ function stripePattern(p: Palette): string {
     lines.push(
       `<rect x="${i}" y="0" width="${thickness}" height="${H * 2}"
         transform="rotate(-30 ${W / 2} ${H / 2})"
-        fill="${p.accent}" opacity="0.22"/>`,
+        fill="${p.accent}" opacity="0.7"/>`,
     );
   }
   return lines.join("");
@@ -132,9 +132,9 @@ function gradientOverlay(p: Palette): string {
   return `
     <defs>
       <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${p.accent}" stop-opacity="0.28"/>
-        <stop offset="60%" stop-color="${p.base}" stop-opacity="0"/>
-        <stop offset="100%" stop-color="${p.ink}" stop-opacity="0.12"/>
+        <stop offset="0%" stop-color="${p.accent}" stop-opacity="0.85"/>
+        <stop offset="60%" stop-color="${p.base}" stop-opacity="0.15"/>
+        <stop offset="100%" stop-color="${p.ink}" stop-opacity="0.45"/>
       </linearGradient>
     </defs>
     <rect width="${W}" height="${H}" fill="url(#g)"/>`;
@@ -151,7 +151,7 @@ function abstractShapes(p: Palette): string {
   ];
   for (const [cx, cy, r] of seed) {
     shapes.push(
-      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${p.accent}" opacity="0.13"/>`,
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${p.accent}" opacity="0.5"/>`,
     );
   }
   return shapes.join("");
@@ -165,7 +165,7 @@ function brandedDiamonds(p: Palette): string {
       cells.push(
         `<polygon
           points="${x},${y - size / 2} ${x + size / 2},${y} ${x},${y + size / 2} ${x - size / 2},${y}"
-          fill="${p.accent}" opacity="0.14"/>`,
+          fill="${p.accent}" opacity="0.55"/>`,
       );
     }
   }

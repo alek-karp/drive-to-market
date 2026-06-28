@@ -79,12 +79,18 @@ export default function Home() {
       setStepIndex(1);
       await delay(400);
 
-      // Stage 5: brand -> wrap concepts.
+      // Stage 5: brand -> wrap concepts + AI-derived pattern texture (parallel).
       setStepIndex(2);
-      const designRes = await postJson("/api/generate-design", {
-        brand: nextBrand,
-      });
-      const nextDesigns = designRes.designs as WrapDesign[];
+      const [designRes, patternRes] = await Promise.all([
+        postJson("/api/generate-design", { brand: nextBrand }),
+        postJson("/api/pattern", { brand: nextBrand }).catch(() => null),
+      ]);
+      const patternUrl = (
+        patternRes as { pattern?: { textureUrl?: string } } | null
+      )?.pattern?.textureUrl;
+      const nextDesigns = (designRes.designs as WrapDesign[]).map((d) =>
+        patternUrl ? { ...d, graphics: { ...d.graphics, patternUrl } } : d,
+      );
       setDesigns(nextDesigns);
 
       // Live ad generation: brand -> one Grok-generated background with our

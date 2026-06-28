@@ -146,8 +146,11 @@ async function saveAd(
   return `/textures/generated/${designId}/ad.png`;
 }
 
-function normalizeBackground(b64: string): Promise<Buffer> {
+function normalizeBackground(b64: string, baseColor: string): Promise<Buffer> {
+  // Flatten any transparency onto the brand's base color so transparent areas
+  // blend with the car's base coat instead of showing as white edges.
   return sharp(Buffer.from(b64, "base64"))
+    .flatten({ background: baseColor })
     .resize(OUTPUT_W, OUTPUT_H, { fit: "cover" })
     .png()
     .toBuffer();
@@ -157,7 +160,8 @@ async function renderAd(
   winner: AdCandidate,
   brand: BrandProfile,
 ): Promise<Buffer> {
-  const background = await normalizeBackground(winner.b64);
+  const baseColor = brand.colors[0] ?? "#ffffff";
+  const background = await normalizeBackground(winner.b64, baseColor);
   const overlay = Buffer.from(adTextOverlaySvg(winner.concept, brand));
   return sharp(background)
     .composite([{ input: overlay, top: 0, left: 0 }])
@@ -170,18 +174,10 @@ function adTextOverlaySvg(concept: AdConcept, brand: BrandProfile): string {
   const x = align === "right" ? OUTPUT_W - 140 : 140;
   const anchor = align === "right" ? "end" : "start";
   const ink = readableInk(brand.colors[0] ?? "#111111");
-  const accent = brand.colors[1] ?? brand.colors[0] ?? "#FFFFFF";
   const brandName = esc(brand.name.toUpperCase());
-  const hook = esc(concept.hook);
-  const subheader = esc(concept.subheader);
-  const cta = esc(concept.cta);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${OUTPUT_W}" height="${OUTPUT_H}" viewBox="0 0 ${OUTPUT_W} ${OUTPUT_H}">
-    <rect x="${align === "right" ? OUTPUT_W - 178 : 140}" y="568" width="38" height="6" rx="3" fill="${accent}"/>
-    <text x="${x}" y="330" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="5" fill="${ink}" opacity="0.9">${brandName}</text>
-    <text x="${x}" y="415" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="72" font-weight="800" letter-spacing="0" fill="${ink}">${hook}</text>
-    <text x="${x}" y="490" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="36" font-weight="500" letter-spacing="0" fill="${ink}" opacity="0.88">${subheader}</text>
-    <text x="${x}" y="570" text-anchor="${anchor}" font-family="Helvetica, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="2" fill="${ink}">${cta}</text>
+    <text x="${x}" y="${OUTPUT_H / 2}" text-anchor="${anchor}" dominant-baseline="middle" font-family="Helvetica, Arial, sans-serif" font-size="96" font-weight="800" letter-spacing="4" fill="${ink}">${brandName}</text>
   </svg>`;
 }
 
