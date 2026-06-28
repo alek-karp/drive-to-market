@@ -25,11 +25,11 @@ import {
   categoryForMaterial,
   isReflectiveOverlayShell,
   isWrappableMesh,
-  MODEL_PATH,
 } from "@/lib/carModel";
 import { isDebugPatternUrl } from "@/lib/debugPattern";
 import { ensureWrapUvs } from "@/lib/meshUvs";
 import type { PaintablePart, WrapDesign } from "@/lib/types";
+import { useTeslaModelUrl } from "@/lib/useTeslaModelUrl";
 
 interface CarModelProps {
   /** The selected wrap concept to paint onto the body, or null for stock paint. */
@@ -136,7 +136,27 @@ export function CarModel({
   onPartsReady,
   onSelect,
 }: CarModelProps) {
-  const { scene } = useGLTF(MODEL_PATH);
+  const modelUrl = useTeslaModelUrl();
+  return (
+    <CarModelScene
+      key={modelUrl}
+      modelUrl={modelUrl}
+      design={design}
+      highlight={highlight}
+      onPartsReady={onPartsReady}
+      onSelect={onSelect}
+    />
+  );
+}
+
+function CarModelScene({
+  modelUrl,
+  design,
+  highlight,
+  onPartsReady,
+  onSelect,
+}: CarModelProps & { modelUrl: string }) {
+  const { scene } = useGLTF(modelUrl);
 
   // Clone so multiple mounts / HMR don't share mutable material state.
   const root = useMemo(() => scene.clone(true), [scene]);
@@ -428,8 +448,6 @@ export function CarModel({
     <primitive object={root} onClick={handleClick} />
   );
 }
-
-useGLTF.preload(MODEL_PATH);
 
 function restoreOriginalUvs(originalUvs: Map<Mesh, Float32Array | null>): void {
   for (const [mesh, uv] of originalUvs) {

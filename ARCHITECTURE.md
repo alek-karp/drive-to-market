@@ -5,6 +5,7 @@ This file tracks the current system shape and architecture decisions. Keep it co
 ## Current State
 
 - Next.js 16 app using the App Router, React 19, Bun scripts, Biome, Tailwind CSS, shadcn-style UI primitives, and Three.js through `@react-three/fiber`.
+- Convex backend (`convex/`) stores seed logos and car model `.glb` files in Convex File Storage; metadata lives in the `assets` table (`orgId`, `type`, `storageId`, `filename`, etc.). Seed with `bun run seed:assets` (optional `LOGOS_DIR` when logos are not in `public/Logos/`).
 - Main user workflow lives in `app/page.tsx`: submit a website URL, extract a brand profile, generate wrap concepts, optionally generate a Grok ad, compose textures, then preview the selected design on a 3D car.
 - Browser-only 3D rendering is isolated behind a dynamic client import of `components/CarViewer.tsx`.
 - Shared domain types live in `lib/types.ts`; route handlers validate request bodies before calling library modules.
@@ -36,8 +37,19 @@ The pipeline follows `DESIGN_MODEL.md`. Stages 1–3 are implemented; stage 4 is
 - `components/*`: interactive UI, 3D viewer, design picker, and visual presentation.
 - `components/ui/*`: reusable UI primitives; keep application-specific behavior out of this folder.
 - `public/*`: static assets and generated/readable files that must be served by the app.
+- `convex/*`: database schema, asset upload mutations/queries (`generateUploadUrl`, `createAsset`, `listLogos`, `listByOrgAndType`). Default org id: `drive-to-market` (`convex/constants.ts`).
 
-## Models
+## Convex Assets
+
+Per the asset architecture doc, files are stored in Convex File Storage; the database holds metadata only.
+
+| Type | Source (seed) | Convex query |
+|------|---------------|----------------|
+| `logo` | `public/Logos/` or `LOGOS_DIR` | `assets:listLogos` |
+| `car_model` | `public/models/tesla.glb` (default) | `assets:getTeslaModelUrl` |
+
+Upload flow: `generateUploadUrl` → POST bytes → `createAsset`. The 3D viewer resolves `tesla.glb` via `assets:getTeslaModelUrl` and falls back to `/models/tesla.glb` when Convex is unavailable or the asset is missing. Seed models default to `tesla.glb` only (`MODEL_FILES` env overrides).
+
 
 Two Tesla GLBs live in `public/models/`:
 

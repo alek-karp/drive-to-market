@@ -43,11 +43,22 @@ const normalizeWrapDesign = (value: unknown): WrapDesign | null => {
 
   if (!id || !style || !description || !baseColor || !graphics) return null;
 
+  const metalness =
+    typeof candidate.metalness === "number" && Number.isFinite(candidate.metalness)
+      ? candidate.metalness
+      : 0.4;
+  const roughness =
+    typeof candidate.roughness === "number" && Number.isFinite(candidate.roughness)
+      ? candidate.roughness
+      : 0.35;
+
   return {
     id,
     style,
     description,
     baseColor,
+    metalness,
+    roughness,
     graphics,
     textures:
       candidate.textures && typeof candidate.textures === "object"
