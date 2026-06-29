@@ -516,12 +516,12 @@ const AD_DECAL_SLOTS: DecalSlot[] = [
     widthFrac: 0.24,
   },
   {
-    along: 0.8,
+    along: 0.82,
     side: 0,
     surface: "top",
     graphic: "hood",
     aspect: 1,
-    widthFrac: 0.5,
+    widthFrac: 0.46,
   },
   {
     side: 0,

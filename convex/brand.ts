@@ -116,9 +116,10 @@ export const extractFromUrl = action({
     const name = truncate(extracted?.name?.trim() || fallbackName, 60);
 
     // These need web research (not just the homepage), so run dedicated searches.
-    const [kitColors, mascot] = await Promise.all([
+    const [kitColors, mascot, foundLogo] = await Promise.all([
       findBrandKitColors(exa, name, host),
       findMascot(exa, name, host),
+      findLogoUrl(exa, name, host),
     ]);
 
     const description = truncate(
@@ -146,8 +147,11 @@ export const extractFromUrl = action({
       pageText,
     );
     // Logo/colors are finalized client-side from a real logo mark
-    // (lib/brandVisuals). Pass through any explicit logo or the favicon as hints.
-    const logoUrl = normalizeUrlOrNull(extracted?.logoUrl) ?? pageFavicon;
+    // (lib/brandVisuals). Prefer an explicit logo from the page, then a
+    // publicly-hosted logo found via web search (works even when the brand's own
+    // domain is unreachable or the user mistyped the TLD), then the favicon.
+    const logoUrl =
+      normalizeUrlOrNull(extracted?.logoUrl) ?? foundLogo ?? pageFavicon;
 
     return {
       name,
@@ -236,6 +240,60 @@ async function findMascot(
   } catch {
     return { name: null, description: null };
   }
+}
+
+/**
+ * Find a publicly-hosted logo image for the brand via web search. This is the
+ * reliable path when the brand's own domain is unreachable, has no indexed
+ * favicon, or the user mistyped the TLD: company directories (LinkedIn, YC,
+ * Crunchbase, Wikipedia) host real logo marks on fetchable CDNs. Returns the
+ * best-scoring image URL, or null when nothing logo-like turns up.
+ */
+async function findLogoUrl(
+  exa: Exa,
+  name: string,
+  host: string,
+): Promise<string | null> {
+  try {
+    const result = await exa.search(`${name} (${host}) company logo`, {
+      type: "auto",
+      numResults: 10,
+    });
+
+    let best: string | null = null;
+    let bestScore = 0;
+    for (const r of result.results) {
+      const img = (r as { image?: string }).image;
+      const score = scoreLogoCandidate(img);
+      if (score > bestScore) {
+        bestScore = score;
+        best = normalizeUrlOrNull(img);
+      }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+/** Rank an image URL by how likely it is to be a real logo mark (0 = reject). */
+function scoreLogoCandidate(url: string | undefined): number {
+  if (!url) return 0;
+  const lower = url.toLowerCase();
+  // Auto-generated social/share banners are not logos.
+  if (lower.includes("/api/og") || /[?&]title=/.test(lower)) return 0;
+  if (/\b(hero|banner|cover|screenshot|preview)\b/.test(lower)) return 0;
+
+  let score = 1;
+  if (/logo/.test(lower)) score += 5;
+  if (lower.includes("company-logo")) score += 3; // LinkedIn company mark
+  if (
+    /(licdn|ycombinator|bookface|crunchbase|wikimedia|wikipedia)/.test(lower)
+  ) {
+    score += 2;
+  }
+  if (/\.(png|svg|webp)(\?|$)/.test(lower)) score += 1;
+  return score;
 }
 
 /**

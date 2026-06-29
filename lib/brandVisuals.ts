@@ -14,14 +14,23 @@ export async function enhanceBrandVisuals(
   brand: BrandProfile,
 ): Promise<BrandProfile> {
   const host = hostnameOf(brand.websiteUrl);
-  const logoUrl = resolveLogoUrl(brand.logoUrl, host);
 
-  const derived = logoUrl
-    ? await paletteFromImage((await fetchImage(logoUrl)) ?? Buffer.alloc(0))
-    : [];
+  // Candidate logo sources, best first. The model-provided URL often 404s or is
+  // a hero/og screenshot, so we pick the first that returns a real image and
+  // always keep the Google favicon service as a reliable fallback.
+  const candidates: string[] = [];
+  if (brand.logoUrl && isRealLogoUrl(brand.logoUrl)) {
+    candidates.push(brand.logoUrl);
+  }
+  if (host) {
+    candidates.push(`https://www.google.com/s2/favicons?domain=${host}&sz=256`);
+  }
+
+  const working = await firstWorkingImage(candidates);
 
   // Official brand-kit colors (from Exa) are authoritative when we actually
   // found some; otherwise fall back to colors derived from the real logo.
+  const derived = working ? await paletteFromImage(working.buffer) : [];
   const hasKitColors =
     !isDefaultPalette(brand.colors) && brand.colors.some((c) => !isNeutral(c));
 
@@ -31,7 +40,29 @@ export async function enhanceBrandVisuals(
       ? mergePalette(derived, brand.colors)
       : brand.colors;
 
-  return { ...brand, logoUrl: logoUrl ?? brand.logoUrl, colors };
+  return { ...brand, logoUrl: working?.url ?? brand.logoUrl, colors };
+}
+
+/** First candidate URL that fetches and decodes as a real image. */
+async function firstWorkingImage(
+  urls: string[],
+): Promise<{ url: string; buffer: Buffer } | null> {
+  for (const url of urls) {
+    const buffer = await fetchImage(url);
+    if (buffer && (await isDecodableImage(buffer))) {
+      return { url, buffer };
+    }
+  }
+  return null;
+}
+
+async function isDecodableImage(buf: Buffer): Promise<boolean> {
+  try {
+    const meta = await sharp(buf).metadata();
+    return Boolean(meta.width && meta.height);
+  } catch {
+    return false;
+  }
 }
 
 /** The hardcoded fallback palette returned when no real colors were found. */
@@ -41,20 +72,6 @@ function isDefaultPalette(colors: string[]): boolean {
     colors.length === sentinel.length &&
     colors.every((c, i) => c.toUpperCase() === sentinel[i])
   );
-}
-
-/**
- * A usable logo URL. Keeps an explicit logo/icon if the source provided one,
- * but rejects hero/og/banner screenshots, then falls back to Google's favicon
- * service (always a real brand mark, never a marketing screenshot).
- */
-function resolveLogoUrl(
-  current: string | null | undefined,
-  host: string | null,
-): string | null {
-  if (current && isRealLogoUrl(current)) return current;
-  if (host) return `https://www.google.com/s2/favicons?domain=${host}&sz=256`;
-  return current ?? null;
 }
 
 function isRealLogoUrl(url: string): boolean {

@@ -166,7 +166,9 @@ async function composeHoodGraphic(
   dir: string,
 ): Promise<string> {
   const cfg = carPartTextureConfig.hood;
-  const brandLogo = await loadBrandLogo(brand?.logoUrl);
+  const brandLogo =
+    (await loadBrandLogo(brand?.logoUrl)) ??
+    (await loadBrandLogo(faviconUrlFor(brand?.websiteUrl)));
 
   const outPath = path.join(dir, "hood-logo.png");
   const input = brandLogo
@@ -334,6 +336,17 @@ function generatedTrunkCtaSvg(
   </svg>`;
 }
 
+/** Google's favicon service — a reliable real brand mark by domain. */
+function faviconUrlFor(websiteUrl: string | null | undefined): string | null {
+  if (!websiteUrl) return null;
+  try {
+    const host = new URL(websiteUrl).hostname.replace(/^www\./, "");
+    return `https://www.google.com/s2/favicons?domain=${host}&sz=256`;
+  } catch {
+    return null;
+  }
+}
+
 async function loadBrandLogo(logoUrl: string | null | undefined) {
   if (!logoUrl) return null;
 
@@ -365,10 +378,19 @@ async function brandLogoHoodPng(
   cfg: PartTextureConfig,
   logoSource: Buffer,
 ): Promise<Buffer> {
-  const maxLogoWidth = Math.round(cfg.width * 0.58);
-  const maxLogoHeight = Math.round(cfg.height * 0.42);
-  const logo = await sharp(logoSource, { density: 300 })
+  // Trim any uniform/transparent padding around the mark so it fills the badge
+  // area consistently regardless of the source's built-in margins.
+  const trimmed = await sharp(logoSource, { density: 300 })
     .rotate()
+    .ensureAlpha()
+    .trim({ threshold: 10 })
+    .png()
+    .toBuffer()
+    .catch(() => logoSource);
+
+  const maxLogoWidth = Math.round(cfg.width * 0.7);
+  const maxLogoHeight = Math.round(cfg.height * 0.7);
+  const logo = await sharp(trimmed, { density: 300 })
     .resize(maxLogoWidth, maxLogoHeight, {
       fit: "inside",
     })
